@@ -222,7 +222,11 @@ unsafe fn mutex_trylock_inner(m: *mut MutexT) -> c_int {
         }
         if (type_ & 15) == MUTEX_NORMAL {
             // trylock.c:69-70: the EBUSY word doubles as "locked".
-            return if ai_cas(m_lock(m), 0, EBUSY) == 0 { 0 } else { EBUSY };
+            return if ai_cas(m_lock(m), 0, EBUSY) == 0 {
+                0
+            } else {
+                EBUSY
+            };
         }
         let tid = self_tid();
         let old = ai_load(m_lock(m));
@@ -251,7 +255,11 @@ unsafe fn mutex_trylock_inner(m: *mut MutexT) -> c_int {
         if old != 0 {
             return EBUSY;
         }
-        if ai_cas(m_lock(m), old, tid) == old { 0 } else { EBUSY }
+        if ai_cas(m_lock(m), old, tid) == old {
+            0
+        } else {
+            EBUSY
+        }
     }
 }
 
@@ -632,7 +640,10 @@ mod tests {
         for h in handles {
             h.join().unwrap();
         }
-        assert_eq!(COUNT.load(Ordering::Relaxed), (NTHREADS * PER_THREAD) as u64);
+        assert_eq!(
+            COUNT.load(Ordering::Relaxed),
+            (NTHREADS * PER_THREAD) as u64
+        );
     }
 
     /// Kinds and init validation, single-threaded: errorcheck reports
@@ -687,18 +698,16 @@ mod tests {
         static ENTERED: AtomicU64 = AtomicU64::new(0);
         static FLAG: AtomicU64 = AtomicU64::new(0);
 
-        let waiter = std::thread::spawn(|| {
-            unsafe {
-                let m = core::ptr::addr_of_mut!(M);
-                let c = core::ptr::addr_of_mut!(C);
-                assert_eq!(crate::sync::pthread_mutex_lock(m), 0);
-                ENTERED.store(1, Ordering::Relaxed);
-                while FLAG.load(Ordering::Relaxed) == 0 {
-                    assert_eq!(crate::sync::pthread_cond_wait(c, m), 0);
-                }
-                assert_eq!(crate::sync::pthread_mutex_unlock(m), 0);
-            }
-        });
+        let waiter = std::thread::spawn(|| unsafe {
+            let m = core::ptr::addr_of_mut!(M);
+            let c = core::ptr::addr_of_mut!(C);
+            assert_eq!(crate::sync::pthread_mutex_lock(m), 0);
+            ENTERED.store(1, Ordering::Relaxed);
+            while FLAG.load(Ordering::Relaxed) == 0 {
+                assert_eq!(crate::sync::pthread_cond_wait(c, m), 0);
+              }
+            assert_eq!(crate::sync::pthread_mutex_unlock(m), 0);
+          });
         unsafe {
             while ENTERED.load(Ordering::Relaxed) == 0 {
                 core::hint::spin_loop();
@@ -727,19 +736,17 @@ mod tests {
 
         let mut handles = std::vec::Vec::new();
         for _ in 0..NWAITERS {
-            handles.push(std::thread::spawn(|| {
-                unsafe {
-                    let m = core::ptr::addr_of_mut!(M);
-                    let c = core::ptr::addr_of_mut!(C);
-                    assert_eq!(crate::sync::pthread_mutex_lock(m), 0);
-                    let _ = ENTERED.fetch_add(1, Ordering::Relaxed);
-                    while FLAG.load(Ordering::Relaxed) == 0 {
-                        assert_eq!(crate::sync::pthread_cond_wait(c, m), 0);
-                    }
-                    let _ = WOKE.fetch_add(1, Ordering::Relaxed);
-                    assert_eq!(crate::sync::pthread_mutex_unlock(m), 0);
-                }
-            }));
+            handles.push(std::thread::spawn(|| unsafe {
+                let m = core::ptr::addr_of_mut!(M);
+                let c = core::ptr::addr_of_mut!(C);
+                assert_eq!(crate::sync::pthread_mutex_lock(m), 0);
+                let _ = ENTERED.fetch_add(1, Ordering::Relaxed);
+                while FLAG.load(Ordering::Relaxed) == 0 {
+                    assert_eq!(crate::sync::pthread_cond_wait(c, m), 0);
+                  }
+                let _ = WOKE.fetch_add(1, Ordering::Relaxed);
+                assert_eq!(crate::sync::pthread_mutex_unlock(m), 0);
+              }));
         }
         unsafe {
             while ENTERED.load(Ordering::Relaxed) != NWAITERS {

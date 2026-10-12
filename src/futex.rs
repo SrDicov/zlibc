@@ -54,7 +54,13 @@ pub unsafe fn futex_wait_private(addr: *mut c_int, val: c_int) -> isize {
         if r != -(ENOSYS as isize) {
             return r;
         }
-        syscall4(SYS_FUTEX, addr as usize, FUTEX_WAIT as usize, val as usize, 0)
+        syscall4(
+            SYS_FUTEX,
+            addr as usize,
+            FUTEX_WAIT as usize,
+            val as usize,
+            0,
+        )
     }
 }
 
@@ -64,7 +70,15 @@ pub unsafe fn futex_wait_private(addr: *mut c_int, val: c_int) -> isize {
 ///
 /// Same contract as [`futex_wait_private`].
 pub unsafe fn futex_wait_shared(addr: *mut c_int, val: c_int) -> isize {
-    unsafe { syscall4(SYS_FUTEX, addr as usize, FUTEX_WAIT as usize, val as usize, 0) }
+    unsafe {
+        syscall4(
+            SYS_FUTEX,
+            addr as usize,
+            FUTEX_WAIT as usize,
+            val as usize,
+            0,
+        )
+    }
 }
 
 /// Wake up to `cnt` sleepers (`cnt < 0` wakes all), private op.
@@ -141,7 +155,13 @@ pub unsafe fn wait(addr: *mut c_int, waiters: *mut c_int, val: c_int, priv_: c_i
         while core::ptr::read_volatile(addr) == val {
             let r = syscall4(SYS_FUTEX, addr as usize, op as usize, val as usize, 0);
             if r == -(ENOSYS as isize) {
-                syscall4(SYS_FUTEX, addr as usize, FUTEX_WAIT as usize, val as usize, 0);
+                syscall4(
+                    SYS_FUTEX,
+                    addr as usize,
+                    FUTEX_WAIT as usize,
+                    val as usize,
+                    0,
+                );
             }
         }
         if !waiters.is_null() {
