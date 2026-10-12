@@ -86,10 +86,13 @@ fn main() {
     }
     fs::write(bits.join("syscall.h"), sc).unwrap();
 
-    // Compile the probe like musl compiles itself: no host libc headers.
+    // Compile the probe like musl compiles itself: no host libc headers,
+    // and -D_XOPEN_SOURCE=700 exactly as musl's CFLAGS_ALL — without it,
+    // public headers withhold __NEED_off_t/__NEED_locale_t and the TU
+    // breaks (this exact failure was observed in CI).
     let probe_bin = out.join("probe");
     let st = Command::new("gcc")
-        .args(["-std=c99", "-ffreestanding", "-nostdinc", "-o"])
+        .args(["-std=c99", "-D_XOPEN_SOURCE=700", "-ffreestanding", "-nostdinc", "-o"])
         .arg(&probe_bin)
         .arg("probe/probe.c")
         .arg(format!("-I{}", gen.display()))
