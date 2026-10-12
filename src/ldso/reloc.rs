@@ -548,7 +548,7 @@ pub unsafe fn do_relocs(dso: *mut Dso, rel: *mut usize, rel_size: usize, stride:
                         // no allocator until Wave 4.
                         fatal((*dso).name, name, b"dynamic TLSDESC needs allocator");
                     }
-                    let desc: usize = tlsdesc_static as usize;
+                    let desc: usize = tlsdesc_static as *const () as usize;
                     *addr.add(0) = desc;
                     *addr.add(1) = tls_val.wrapping_sub((*def_dso).tls.offset).wrapping_add(a);
                 }
@@ -804,7 +804,7 @@ mod tests {
                 3,
             )
         };
-        let want_fn: usize = tlsdesc_static as usize;
+        let want_fn: usize = tlsdesc_static as *const () as usize;
         assert_eq!(unsafe { *at(base, 0x08) }, want_fn);
         assert_eq!(
             unsafe { *at(base, 0x10) },
@@ -822,7 +822,7 @@ mod tests {
         let base = mem.as_mut_ptr();
         let mut dso: Dso = unsafe { core::mem::zeroed() };
         dso.base = base;
-        let target: usize = probe_resolver as usize;
+        let target: usize = probe_resolver as *const () as usize;
         let mut rela = [
             0x18usize,
             info(0, REL_IRELATIVE),
