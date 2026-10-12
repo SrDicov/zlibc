@@ -7,6 +7,7 @@
 extern crate std;
 
 pub mod abi;
+pub mod errno;
 pub mod futex;
 pub mod mem;
 pub mod panic;

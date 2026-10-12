@@ -68,10 +68,13 @@ Evidence correction: musl x86_64 provides `__syscall0..6`
 - OUTCOME (CI-verified): `PthreadT` + `SIZE_PTHREAD_T` probe accepted
   (probe measured 38 values, asserts green). **But `#[thread_local]`
   is nightly-only (E0658, rust-lang/rust#29594) — it does NOT build on
-  stable.** Real `__errno_location` DEFERRED to Wave 2/3, when zlibc
-  owns TLS/TP setup. A2 merge reverted (`testing` reset to `cd1325f`,
-  A1 re-merged solo); `ws/a2` branch kept for cherry-picking the good
-  parts. Fixup workstream: `ws/a2f`.
+  stable.** Interim resolution: `src/errno.rs` now holds a
+  process-global cell (`shortcut:`) — observationally identical with no
+  threads, and it makes the weak alias + `syscall_ret` path fully
+  functional and host-independent. Wave 3 REPLACES its body with the
+  TP-based version (never a second definition — that would be a
+  duplicate symbol); `ws/a2` branch kept for the `PthreadT` history.
+  Fixup workstream: `ws/a2f`.
 
 ### A3 — weak aliases (owner: `src/symbols.rs`, after A1+A2 green)
 - `global_asm!` emitting `.weak` + `.set` (+ `.hidden` where musl

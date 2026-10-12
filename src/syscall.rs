@@ -263,10 +263,10 @@ mod tests {
     }
 
     /// Proves `___errno_location` exists as an alias of
-    /// `__errno_location`: both addresses must coincide. (On a glibc
-    /// host they resolve to glibc's definition; on freestanding zlibc
-    /// they will resolve to ours. A missing alias would fail here at
-    /// link time instead.) The alias stays WEAK (see musl
+    /// `__errno_location`: both addresses must coincide. Both resolve to
+    /// zlibc's own definition (our static interposes the host's shared
+    /// one), so this holds on any host. A missing alias would fail here
+    /// at link time instead. The alias stays WEAK (see musl
     /// src/errno/__errno_location.c:9), so a future strong definition
     /// overrides it without duplicate-symbol errors.
     #[cfg(target_arch = "x86_64")]
