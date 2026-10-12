@@ -1,6 +1,11 @@
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+// Tests link the harness (std); the `no_std` attribute above hides the
+// implicit `std` extern crate, so re-add it for test builds only.
+#[cfg(test)]
+extern crate std;
+
 pub mod abi;
 pub mod futex;
 pub mod mem;
