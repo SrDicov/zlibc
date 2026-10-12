@@ -303,9 +303,10 @@ pub unsafe extern "C" fn __pthread_create(
         let base = map as *mut u8;
         let td = copy_tls(base, size);
         (*td).tid = 0;
-        (*td)
-            .detach_state
-            .store(if detached { DT_DETACHED } else { DT_JOINABLE }, Ordering::SeqCst);
+        (*td).detach_state.store(
+            if detached { DT_DETACHED } else { DT_JOINABLE },
+            Ordering::SeqCst,
+        );
         // Slot reserved; `errno.rs` still serves one global cell (module docs).
         (*td).errno_val = 0;
         (*td).map_base = base;
