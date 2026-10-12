@@ -36,7 +36,8 @@ jobs:
 
       - name: weak-alias nm check
         run: |
-          nm target/debug/libzlibc.rlib > nm.txt
+          nm target/debug/libzlibc.rlib 2>/dev/null > nm.txt || true
+          cat nm.txt
           grep -qE " [Ww] ___errno_location" nm.txt
 
       - name: Test (runs build.rs ABI probe + asserts + unit tests)
