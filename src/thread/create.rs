@@ -308,7 +308,10 @@ pub unsafe extern "C" fn __pthread_create(
             }
         }
         let base = map as *mut u8;
-        let td = copy_tls(base, size);
+        // TLS block at the top, like musl's `__copy_tls(tsd - tls_size)`
+        // (create.c:318): never inside the PROT_NONE guard at `base`,
+        // where the DTV write would fault.
+        let td = copy_tls(base.wrapping_add(size - tls_size), tls_size);
         (*td).tid = 0;
         (*td).detach_state.store(
             if detached { DT_DETACHED } else { DT_JOINABLE },
