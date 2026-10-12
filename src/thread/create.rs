@@ -802,6 +802,7 @@ pub unsafe extern "C" fn __pthread_attr_getinheritsched(
 
 #[cfg(test)]
 mod tests {
+    use super::super::{ARCH_GET_FS, SYS_ARCH_PRCTL};
     use super::*;
     use crate::syscall::syscall2;
     use core::sync::atomic::AtomicU32;
