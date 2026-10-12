@@ -76,15 +76,15 @@ fn tid_word(td: *mut Thread) -> *mut c_int {
 /// through the trap frame aborts the process).
 #[cfg(target_arch = "x86_64")]
 unsafe fn raw_clone(
-    flags: u32,
-    stack: usize,
-    ptid: usize,
+    mut flags: u32,
+    mut stack: usize,
+    mut ptid: usize,
     ctid: usize,
-    tls: usize,
+    mut tls: usize,
     func: usize,
-    arg: usize,
+    mut arg: usize,
 ) -> isize {
-    let ret: isize;
+    let mut ret: isize;
     unsafe {
         core::arch::asm!(
             "and rsi, -16",
