@@ -276,8 +276,8 @@ mod tests {
             static ___errno_location: u8;
             fn __errno_location() -> *mut core::ffi::c_int;
         }
-        let alias = core::ptr::addr_of!(___errno_location) as *const u8 as usize;
-        let target = __errno_location as usize;
+        let alias = core::ptr::addr_of!(___errno_location) as usize;
+        let target = __errno_location as *const () as usize;
         assert_eq!(alias, target, "weak alias does not track __errno_location");
     }
 }
