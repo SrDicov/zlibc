@@ -59,6 +59,11 @@ const K_SIGSET_LEN: usize = 8;
 /// musl `void (*)(void *)` callback (`src/thread/synccall.c:13`).
 pub type SynccallFn = unsafe extern "C" fn(*mut c_void);
 
+// musl marks `__synccall` hidden (src/internal/libc.h:55): keep it out
+// of the dynamic symbol table in real links. Link-inert in tests.
+#[cfg(target_arch = "x86_64")]
+core::arch::global_asm!(".hidden __synccall");
+
 /// Raw `rt_sigaction` argument (musl `arch/x86_64/ksigaction.h:3-8`):
 /// handler, flags, restorer, then an 8-byte kernel mask (`_NSIG/8`).
 /// No `SA_RESTORER`: on x86_64 the kernel falls back to the vDSO
@@ -157,6 +162,10 @@ static WAVE_CTX: AtomicUsize = AtomicUsize::new(0);
 
 /// Abort callback: runs in place of the wave when a `tkill` fails
 /// mid-catch (synccall.c:87 assigns `callback = func = dummy`).
+///
+/// # Safety
+///
+/// Callable in any thread context; touches nothing.
 unsafe extern "C" fn dummy_wave(_ctx: *mut c_void) {}
 
 /// Link a new thread into the registry ring.
@@ -202,6 +211,11 @@ pub(crate) unsafe fn register_thread(td: *mut Thread) {
 /// The caller must hold `REG_LOCK` and have established that `td` is
 /// listed. Never writes `td` itself: a pruned node may be dead memory —
 /// only its neighbors (listed, therefore live) are written.
+///
+/// # Safety
+///
+/// Same contract as [`register_thread`]: caller holds `REG_LOCK`, `td`
+/// listed; neighbors live.
 unsafe fn cut_locked(td: *mut Thread) {
     unsafe {
         let next = (*td).head.next;
@@ -254,6 +268,11 @@ pub(crate) unsafe fn unregister_thread(td: *mut Thread) {
 /// the registry lock for the whole wave), no allocation, no panics — any
 /// of those here hangs or corrupts the process. `errno` is saved and
 /// restored like musl, since the callback may run syscalls.
+///
+/// # Safety
+///
+/// Runs only as a wave signal handler (installed by [`__synccall`]);
+/// never call directly.
 unsafe extern "C" fn synccall_handler(_sig: c_int) {
     unsafe {
         // Not our catch (stray signal, or the wave already moved on): do
