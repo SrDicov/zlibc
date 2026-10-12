@@ -9,11 +9,13 @@ license = "MIT"
 # rlib for now; cdylib/staticlib once the linkable libc is assembled.
 crate-type = ["rlib"]
 
+# NOTE: no compiler_builtins dependency on purpose. The crates.io
+# releases require a nightly compiler (unconditional #![feature]), so
+# they cannot build on stable. On standard targets (host,
+# x86_64-unknown-linux-musl) rustc already links the sysroot
+# compiler-rt, which covers the helpers. Reintroduce compiler_builtins
+# when moving to nightly or custom freestanding targets.
 [dependencies]
-# Runtime helpers Rust cannot codegen inline (e.g. integer division
-# helpers on some archs). Foundational: without this, no freestanding
-# libc links. Default features are the standard external-use set.
-compiler_builtins = "0.1"
 
 [build-dependencies]
 # None: build.rs shells out to the host gcc directly (see build.rs).

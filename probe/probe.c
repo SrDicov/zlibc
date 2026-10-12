@@ -8,6 +8,8 @@
  */
 #include <stdio.h>
 #include <stddef.h>
+#include <locale.h> /* locale_t, needed by pthread_impl.h */
+#include "stdio_impl.h" /* struct _IO_FILE definition (public stdio.h only forward-declares it) */
 #include "pthread_impl.h"
 
 #define E(n, v) printf(#n " %lu\n", (unsigned long)(v))

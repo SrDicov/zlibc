@@ -48,9 +48,10 @@ Every push and PR is built and tested on GitHub Actions (host build,
 
 ## Design notes
 
-- `compiler_builtins` is a foundational dependency: freestanding Rust
-  needs compiler runtime helpers (`__udivti3`, …). Zero-dependency
-  `no_std` is not a realistic goal for a libc.
+- `compiler_builtins` is deliberately **not** a dependency yet:
+  crates.io releases need nightly, and on standard targets rustc links
+  the sysroot compiler-rt automatically. It returns with nightly or
+  custom freestanding targets.
 - C `volatile int lock` stays a plain `c_int` field; volatility is
   enforced at access sites via volatile intrinsics, never by changing
   the layout type.
