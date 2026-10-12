@@ -187,8 +187,8 @@ mod tests {
     /// `__wait.c:9` early-out), leaving a non-null `waiters` untouched.
     #[test]
     fn wait_returns_at_once_when_value_differs() {
-        let word: c_int = 7;
-        let waiters: c_int = 0;
+        let mut word: c_int = 7;
+        let mut waiters: c_int = 0;
         unsafe {
             crate::futex::wait(
                 core::ptr::addr_of_mut!(word),
