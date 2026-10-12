@@ -67,3 +67,22 @@ pub struct PthreadHead {
     pub sysinfo: usize,
     pub canary: usize,
 }
+
+/// musl `pthread_t` (include/alltypes.h.in).
+///
+/// The generic header spells it two ways: `unsigned long` for C++ TUs,
+/// `struct __pthread *` for C TUs (`struct pthread` in
+/// src/internal/pthread_impl.h, renamed by its own
+/// `#define pthread __pthread`). No arch overrides it
+/// (arch/x86_64/bits/alltypes.h.in has no `pthread_t`), so x86_64 C
+/// code — including the probe — sees the pointer form. Both spellings
+/// are 8 bytes on 64-bit, so this one alias is ABI-exact for both.
+#[cfg(target_arch = "x86_64")]
+#[repr(C)]
+pub struct PthreadOpaque {
+    _opaque: [u8; 0],
+}
+
+/// musl `pthread_t` on x86_64: pointer to the opaque thread struct.
+#[cfg(target_arch = "x86_64")]
+pub type PthreadT = *mut PthreadOpaque;
