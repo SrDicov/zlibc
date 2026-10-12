@@ -967,8 +967,9 @@ mod tests {
             FLAG.store(0, Ordering::SeqCst);
             let mut attr = AttrT::default();
             let mut dt: PthreadT = null_mut();
+            // Joinable at birth: detach once (0), detach again (EINVAL),
+            // then the detached death runs flag_routine via __unmapself.
             if __pthread_attr_init(&mut attr) == 0
-                && __pthread_attr_setdetachstate(&mut attr, 1) == 0
                 && __pthread_create(&mut dt, &attr, Some(flag_routine), null_mut()) == 0
             {
                 detach_rc = __pthread_detach(dt);
