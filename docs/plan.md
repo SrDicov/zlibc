@@ -290,10 +290,25 @@ Evidence (all verified in /home/dicov/musl):
   assumptions anywhere.
 - Proposes `pub mod thread;` line for coordinator.
 
-### C3 — synccall (launches after C1; needs real threads + TIDs)
-src/thread/synccall.rs: `__synccall` per musl src/thread/synccall.c (C3
-verifies the filename first), SIGSYNCCALL handler, caller/target/exit
-sems over C2 futex, atomics-only in handler (AS-safe). Depends on C1+C2.
+### C3 — synccall (worktree ../zlibc-c3, owns src/thread/synccall.rs)
+Needs real threads + TIDs (C1 merged ✓) + C2 futex (merged ✓).
+Design decision (no global list exists — C1 self-links): the thread
+registry lives HERE, not in create.rs: head pointer + futex lock
+(`AtomicI32`, C2 primitives) in synccall.rs, with `register`/`unregister`
+fns. C3 may add the minimal hooks in create.rs (register after successful
+clone; unregister in `thread_exit` on BOTH paths — join only unmaps, the
+thread is already unlinked) — flag each hook line with a comment.
+`__synccall` per musl src/thread/synccall.c (C3 verifies the filename
+first): block SIGSYNCCALL via rt_sigprocmask (14), take the registry
+lock, caller/target/exit sems, `tkill` (200) the wave, AS-safe handler
+(atomics + futex waits only, zero allocation/locks/panics), run the
+callback on every thread including caller, release. Handler installed
+via raw rt_sigaction (13). Signal number 34 (pthread_impl.h:131).
+Tests: N threads spinning on a flag + synccall incrementing a shared
+counter (expect exactly N target-runs + 1 caller-run), no timing
+assumptions (spin on atomics, never sleep-then-hope). No cancel
+integration (OUT). Proposes nothing for lib.rs (lives under
+src/thread/, already wired).
 
 ### Wave 3 gate
 N-thread counter + mutex/condvar rendezvous test green, then merge
