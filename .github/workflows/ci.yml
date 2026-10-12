@@ -34,5 +34,10 @@ jobs:
       - name: Build (x86_64-unknown-linux-musl)
         run: cargo build --verbose --target x86_64-unknown-linux-musl
 
+      - name: weak-alias nm check
+        run: |
+          nm target/debug/libzlibc.rlib > nm.txt
+          grep -qE " [Ww] ___errno_location" nm.txt
+
       - name: Test (runs build.rs ABI probe + asserts + unit tests)
         run: cargo test --verbose

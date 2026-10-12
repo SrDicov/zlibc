@@ -2,6 +2,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod abi;
+pub mod symbols;
 pub mod syscall;
 
 // OUT_DIR/abi_probed.rs is emitted by build.rs with sizes/offsets
