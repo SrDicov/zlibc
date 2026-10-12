@@ -50,5 +50,5 @@ pub unsafe extern "C" fn __errno_location() -> *mut c_int {
 // Same contract as [`__errno_location`].
 #[no_mangle]
 pub unsafe extern "C" fn ___errno_location() -> *mut c_int {
-    __errno_location()
+    unsafe { __errno_location() }
 }
