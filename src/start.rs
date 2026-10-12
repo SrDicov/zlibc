@@ -13,9 +13,9 @@
 //! the test harness itself. Tests therefore cover only the pure auxv-table
 //! fill; `_start`/`exit` are never executed in tests.
 
-use core::ffi::{c_char, c_int, c_schar, c_void};
 #[cfg(not(test))]
 use core::ffi::c_long;
+use core::ffi::{c_char, c_int, c_schar, c_void};
 #[cfg(not(test))]
 use core::sync::atomic::{AtomicI32, Ordering};
 
@@ -274,7 +274,10 @@ pub unsafe extern "C" fn __init_ssp(entropy: *mut c_void) {
 #[cfg(not(test))]
 #[no_mangle]
 pub extern "C" fn exit(code: c_int) -> ! {
-    if EXIT_LOCK.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+    if EXIT_LOCK
+        .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
         // Trap: musl `a_crash()` equivalent for recursive `exit`.
         #[cfg(target_arch = "x86_64")]
         unsafe {
@@ -347,7 +350,7 @@ crate::weak_alias!(__libc_start_init, __start_dummy);
 
 #[cfg(test)]
 mod tests {
-    use super::{AT_HWCAP, AT_NULL, AT_PAGESZ, AUX_CNT, auxv_fill};
+    use super::{auxv_fill, AT_HWCAP, AT_NULL, AT_PAGESZ, AUX_CNT};
 
     fn fill(words: &[usize]) -> [usize; AUX_CNT] {
         let mut table = [0usize; AUX_CNT];
