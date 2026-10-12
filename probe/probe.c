@@ -12,8 +12,60 @@
 #include "stdio_impl.h" /* struct _IO_FILE definition (public stdio.h only forward-declares it) */
 #include "pthread_impl.h"
 #include <pthread.h> /* pthread_t (already pulled in via pthread_impl.h; explicit here for the SIZE_PTHREAD_T probe) */
+#include <elf.h> /* Elf64_* file structures for the ldso probes */
+#include <link.h> /* Elf_Symndx (arch/generic/bits/link.h:1) for the dso probe */
+#include <stdint.h> /* uint32_t/int16_t/uintptr_t for the dso probe */
+#include <sys/types.h> /* dev_t/ino_t for the dso probe */
+#include "libc.h" /* struct tls_module (src/internal/libc.h:14-18) for the dso probe */
 
 #define E(n, v) printf(#n " %lu\n", (unsigned long)(v))
+
+/* Layout mirror of musl `struct dso` (ldso/dynlink.c:67-121, x86_64 with
+ * DL_FDPIC=0: `base` first, `loadmap` pointer at tail). Field types and
+ * order match musl exactly so gcc lays this out identically; the probe
+ * prints the real C sizeof/offsets and lib.rs asserts the Rust mirror
+ * (src/ldso/dso.rs) against them. The C `buf[]` flex tail is omitted
+ * (adds 0 to sizeof). LIMIT: `struct dso` itself is static to
+ * dynlink.c, so this mirror cannot name it; if musl adds, removes, or
+ * reorders a field, update this struct AND src/ldso/dso.rs together.
+ */
+struct td_index;
+struct fdpic_loadmap;
+struct zlibc_dso {
+	unsigned char *base;
+	char *name;
+	size_t *dynv;
+	struct zlibc_dso *next, *prev;
+	Elf64_Phdr *phdr;
+	int phnum;
+	size_t phentsize;
+	Elf64_Sym *syms;
+	Elf_Symndx *hashtab;
+	uint32_t *ghashtab;
+	int16_t *versym;
+	char *strings;
+	struct zlibc_dso *syms_next, *lazy_next;
+	size_t *lazy, lazy_cnt;
+	unsigned char *map;
+	size_t map_len;
+	dev_t dev;
+	ino_t ino;
+	char relocated, constructed, kernel_mapped, mark, bfs_built, runtime_loaded;
+	struct zlibc_dso **deps, *needed_by;
+	size_t ndeps_direct, next_dep;
+	pthread_t ctor_visitor;
+	char *rpath_orig, *rpath;
+	struct tls_module tls;
+	size_t tls_id, relro_start, relro_end;
+	uintptr_t *new_dtv;
+	unsigned char *new_tls;
+	struct td_index *td_index;
+	struct zlibc_dso *fini_next;
+	char *shortname;
+	struct fdpic_loadmap *loadmap;
+	struct zlibc_funcdesc { void *addr; size_t *got; } *funcdescs;
+	size_t *got;
+};
 
 int main(void)
 {
@@ -59,5 +111,75 @@ int main(void)
 
 	/* pthread_t (include/alltypes.h.in: struct __pthread * on x86_64). */
 	E(SIZE_PTHREAD_T, sizeof(pthread_t));
+
+	/* ELF64 file structures (include/elf.h) for src/ldso/mod.rs. */
+	E(SIZE_ELF64_EHDR, sizeof(Elf64_Ehdr));
+	E(SIZE_ELF64_PHDR, sizeof(Elf64_Phdr));
+	E(SIZE_ELF64_DYN, sizeof(Elf64_Dyn));
+	E(SIZE_ELF64_SYM, sizeof(Elf64_Sym));
+	E(OFF_ELF64_SYM_ST_NAME, offsetof(Elf64_Sym, st_name));
+	E(OFF_ELF64_SYM_ST_INFO, offsetof(Elf64_Sym, st_info));
+	E(OFF_ELF64_SYM_ST_OTHER, offsetof(Elf64_Sym, st_other));
+	E(OFF_ELF64_SYM_ST_SHNDX, offsetof(Elf64_Sym, st_shndx));
+	E(OFF_ELF64_SYM_ST_VALUE, offsetof(Elf64_Sym, st_value));
+	E(OFF_ELF64_SYM_ST_SIZE, offsetof(Elf64_Sym, st_size));
+
+	/* struct tls_module (src/internal/libc.h:14-18) for TlsModule. */
+	E(SIZE_TLS_MODULE, sizeof(struct tls_module));
+	E(OFF_TLS_MODULE_NEXT, offsetof(struct tls_module, next));
+	E(OFF_TLS_MODULE_IMAGE, offsetof(struct tls_module, image));
+	E(OFF_TLS_MODULE_LEN, offsetof(struct tls_module, len));
+	E(OFF_TLS_MODULE_SIZE, offsetof(struct tls_module, size));
+	E(OFF_TLS_MODULE_ALIGN, offsetof(struct tls_module, align));
+	E(OFF_TLS_MODULE_OFFSET, offsetof(struct tls_module, offset));
+
+	/* struct dso mirror above, for Dso in src/ldso/dso.rs. */
+	E(SIZE_DSO, sizeof(struct zlibc_dso));
+	E(OFF_DSO_BASE, offsetof(struct zlibc_dso, base));
+	E(OFF_DSO_NAME, offsetof(struct zlibc_dso, name));
+	E(OFF_DSO_DYNV, offsetof(struct zlibc_dso, dynv));
+	E(OFF_DSO_NEXT, offsetof(struct zlibc_dso, next));
+	E(OFF_DSO_PREV, offsetof(struct zlibc_dso, prev));
+	E(OFF_DSO_PHDR, offsetof(struct zlibc_dso, phdr));
+	E(OFF_DSO_PHNUM, offsetof(struct zlibc_dso, phnum));
+	E(OFF_DSO_PHENTSIZE, offsetof(struct zlibc_dso, phentsize));
+	E(OFF_DSO_SYMS, offsetof(struct zlibc_dso, syms));
+	E(OFF_DSO_HASHTAB, offsetof(struct zlibc_dso, hashtab));
+	E(OFF_DSO_GHASHTAB, offsetof(struct zlibc_dso, ghashtab));
+	E(OFF_DSO_VERSYM, offsetof(struct zlibc_dso, versym));
+	E(OFF_DSO_STRINGS, offsetof(struct zlibc_dso, strings));
+	E(OFF_DSO_SYMS_NEXT, offsetof(struct zlibc_dso, syms_next));
+	E(OFF_DSO_LAZY_NEXT, offsetof(struct zlibc_dso, lazy_next));
+	E(OFF_DSO_LAZY, offsetof(struct zlibc_dso, lazy));
+	E(OFF_DSO_LAZY_CNT, offsetof(struct zlibc_dso, lazy_cnt));
+	E(OFF_DSO_MAP, offsetof(struct zlibc_dso, map));
+	E(OFF_DSO_MAP_LEN, offsetof(struct zlibc_dso, map_len));
+	E(OFF_DSO_DEV, offsetof(struct zlibc_dso, dev));
+	E(OFF_DSO_INO, offsetof(struct zlibc_dso, ino));
+	E(OFF_DSO_RELOCATED, offsetof(struct zlibc_dso, relocated));
+	E(OFF_DSO_CONSTRUCTED, offsetof(struct zlibc_dso, constructed));
+	E(OFF_DSO_KERNEL_MAPPED, offsetof(struct zlibc_dso, kernel_mapped));
+	E(OFF_DSO_MARK, offsetof(struct zlibc_dso, mark));
+	E(OFF_DSO_BFS_BUILT, offsetof(struct zlibc_dso, bfs_built));
+	E(OFF_DSO_RUNTIME_LOADED, offsetof(struct zlibc_dso, runtime_loaded));
+	E(OFF_DSO_DEPS, offsetof(struct zlibc_dso, deps));
+	E(OFF_DSO_NEEDED_BY, offsetof(struct zlibc_dso, needed_by));
+	E(OFF_DSO_NDEPS_DIRECT, offsetof(struct zlibc_dso, ndeps_direct));
+	E(OFF_DSO_NEXT_DEP, offsetof(struct zlibc_dso, next_dep));
+	E(OFF_DSO_CTOR_VISITOR, offsetof(struct zlibc_dso, ctor_visitor));
+	E(OFF_DSO_RPATH_ORIG, offsetof(struct zlibc_dso, rpath_orig));
+	E(OFF_DSO_RPATH, offsetof(struct zlibc_dso, rpath));
+	E(OFF_DSO_TLS, offsetof(struct zlibc_dso, tls));
+	E(OFF_DSO_TLS_ID, offsetof(struct zlibc_dso, tls_id));
+	E(OFF_DSO_RELRO_START, offsetof(struct zlibc_dso, relro_start));
+	E(OFF_DSO_RELRO_END, offsetof(struct zlibc_dso, relro_end));
+	E(OFF_DSO_NEW_DTV, offsetof(struct zlibc_dso, new_dtv));
+	E(OFF_DSO_NEW_TLS, offsetof(struct zlibc_dso, new_tls));
+	E(OFF_DSO_TD_INDEX, offsetof(struct zlibc_dso, td_index));
+	E(OFF_DSO_FINI_NEXT, offsetof(struct zlibc_dso, fini_next));
+	E(OFF_DSO_SHORTNAME, offsetof(struct zlibc_dso, shortname));
+	E(OFF_DSO_LOADMAP, offsetof(struct zlibc_dso, loadmap));
+	E(OFF_DSO_FUNCDESCS, offsetof(struct zlibc_dso, funcdescs));
+	E(OFF_DSO_GOT, offsetof(struct zlibc_dso, got));
 	return 0;
 }
