@@ -65,6 +65,13 @@ Evidence correction: musl x86_64 provides `__syscall0..6`
   stays coordinator-owned this wave — probe.c edits go through
   coordinator review to keep the 37 green asserts intact).
 - Report: offsets measured, TLS approach, risks.
+- OUTCOME (CI-verified): `PthreadT` + `SIZE_PTHREAD_T` probe accepted
+  (probe measured 38 values, asserts green). **But `#[thread_local]`
+  is nightly-only (E0658, rust-lang/rust#29594) — it does NOT build on
+  stable.** Real `__errno_location` DEFERRED to Wave 2/3, when zlibc
+  owns TLS/TP setup. A2 merge reverted (`testing` reset to `cd1325f`,
+  A1 re-merged solo); `ws/a2` branch kept for cherry-picking the good
+  parts. Fixup workstream: `ws/a2f`.
 
 ### A3 — weak aliases (owner: `src/symbols.rs`, after A1+A2 green)
 - `global_asm!` emitting `.weak` + `.set` (+ `.hidden` where musl
