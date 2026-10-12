@@ -189,65 +189,59 @@ extern "C" {
 }
 
 /// C-style dispatcher: `__syscall!(SYS_WRITE, fd, buf, len)`.
+///
+/// Each arm binds its arguments OUTSIDE the `unsafe` block (a bare
+/// `unsafe { syscall_ret(syscallN($n, ...)) }` would expand caller
+/// metavariables inside `unsafe`, tripping
+/// `clippy::macro_metavars_in_unsafe`). Callers use the macro in safe
+/// position; the raw trap stays inside.
 #[macro_export]
 macro_rules! __syscall {
-    ($n:expr) => {
-        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall0($n)) }
-    };
-    ($n:expr, $a1:expr) => {
-        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall1($n, $a1 as usize)) }
-    };
-    ($n:expr, $a1:expr, $a2:expr) => {
+    ($n:expr) => {{
+        let n = $n;
+        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall0(n)) }
+    }};
+    ($n:expr, $a1:expr) => {{
+        let (n, a1) = ($n, $a1 as usize);
+        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall1(n, a1)) }
+    }};
+    ($n:expr, $a1:expr, $a2:expr) => {{
+        let (n, a1, a2) = ($n, $a1 as usize, $a2 as usize);
+        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall2(n, a1, a2)) }
+    }};
+    ($n:expr, $a1:expr, $a2:expr, $a3:expr) => {{
+        let (n, a1, a2, a3) = ($n, $a1 as usize, $a2 as usize, $a3 as usize);
+        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall3(n, a1, a2, a3)) }
+    }};
+    ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr) => {{
+        let (n, a1, a2, a3, a4) = ($n, $a1 as usize, $a2 as usize, $a3 as usize, $a4 as usize);
+        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall4(n, a1, a2, a3, a4)) }
+    }};
+    ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr) => {{
+        let (n, a1, a2, a3, a4, a5) = (
+            $n,
+            $a1 as usize,
+            $a2 as usize,
+            $a3 as usize,
+            $a4 as usize,
+            $a5 as usize,
+        );
+        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall5(n, a1, a2, a3, a4, a5)) }
+    }};
+    ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr, $a6:expr) => {{
+        let (n, a1, a2, a3, a4, a5, a6) = (
+            $n,
+            $a1 as usize,
+            $a2 as usize,
+            $a3 as usize,
+            $a4 as usize,
+            $a5 as usize,
+            $a6 as usize,
+        );
         unsafe {
-            $crate::syscall::syscall_ret($crate::syscall::syscall2($n, $a1 as usize, $a2 as usize))
+            $crate::syscall::syscall_ret($crate::syscall::syscall6(n, a1, a2, a3, a4, a5, a6))
         }
-    };
-    ($n:expr, $a1:expr, $a2:expr, $a3:expr) => {
-        unsafe {
-            $crate::syscall::syscall_ret($crate::syscall::syscall3(
-                $n,
-                $a1 as usize,
-                $a2 as usize,
-                $a3 as usize,
-            ))
-        }
-    };
-    ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr) => {
-        unsafe {
-            $crate::syscall::syscall_ret($crate::syscall::syscall4(
-                $n,
-                $a1 as usize,
-                $a2 as usize,
-                $a3 as usize,
-                $a4 as usize,
-            ))
-        }
-    };
-    ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr) => {
-        unsafe {
-            $crate::syscall::syscall_ret($crate::syscall::syscall5(
-                $n,
-                $a1 as usize,
-                $a2 as usize,
-                $a3 as usize,
-                $a4 as usize,
-                $a5 as usize,
-            ))
-        }
-    };
-    ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr, $a6:expr) => {
-        unsafe {
-            $crate::syscall::syscall_ret($crate::syscall::syscall6(
-                $n,
-                $a1 as usize,
-                $a2 as usize,
-                $a3 as usize,
-                $a4 as usize,
-                $a5 as usize,
-                $a6 as usize,
-            ))
-        }
-    };
+    }};
 }
 
 #[cfg(test)]
@@ -262,22 +256,21 @@ mod tests {
         assert!(pid > 0, "getpid returned {pid}");
     }
 
-    /// Proves `___errno_location` exists as an alias of
-    /// `__errno_location`: both addresses must coincide. (On a glibc
-    /// host they resolve to glibc's definition; on freestanding zlibc
-    /// they will resolve to ours. A missing alias would fail here at
-    /// link time instead.) The alias stays WEAK (see musl
-    /// src/errno/__errno_location.c:9), so a future strong definition
-    /// overrides it without duplicate-symbol errors.
+    /// Proves both errno names yield the same cell (musl weak-alias
+    /// contract, src/errno/__errno_location.c:9), and that the
+    /// `syscall_ret` error path stores through it. A missing
+    /// `___errno_location` would fail here at link time instead.
     #[cfg(target_arch = "x86_64")]
     #[test]
-    fn weak_alias_targets_errno_location() {
+    fn errno_aliases_share_one_cell() {
         extern "C" {
-            static ___errno_location: u8;
-            fn __errno_location() -> *mut core::ffi::c_int;
+            fn ___errno_location() -> *mut core::ffi::c_int;
         }
-        let alias = core::ptr::addr_of!(___errno_location) as usize;
-        let target = __errno_location as *const () as usize;
-        assert_eq!(alias, target, "weak alias does not track __errno_location");
+        unsafe {
+            assert_eq!(___errno_location(), crate::errno::__errno_location());
+            assert_eq!(crate::syscall::syscall_ret(-2), -1);
+            assert_eq!(*crate::errno::__errno_location(), 2);
+            assert_eq!(crate::syscall::syscall_ret(7), 7);
+        }
     }
 }

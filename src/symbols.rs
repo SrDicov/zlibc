@@ -42,15 +42,10 @@ macro_rules! weak_alias {
     };
 }
 
-// Mirrors musl src/errno/__errno_location.c:9 (`___errno_location` aliasing
-// `__errno_location`).
-//
-// NOTE (forward reference, musl-faithful): `__errno_location` is currently
-// only *declared* (`extern "C"` in src/syscall.rs); its real definition
-// lands in Wave 2/3 (stable `#[thread_local]` is unavailable, E0658). This
-// matches musl's own pattern, where the alias and the definition coexist,
-// and an undefined `.set` target is valid ELF: the assembler leaves it for
-// the final link, where the later definition resolves it. CI asserts the
-// weak binding with `nm` (see workstream report for the proposed step).
-#[cfg(target_arch = "x86_64")]
-crate::weak_alias!(___errno_location, __errno_location);
+// The `___errno_location` weak alias is NOT emitted here: a `.set` to an
+// externally-defined target leaves no linkable weak record with this
+// toolchain's assembler (proven by link failure in CI), so
+// `crate::errno` defines it as a forwarding function instead. The
+// `weak_alias!` macro above stays for the boot-hook aliases in
+// `crate::start` (presence verification deferred to the first real
+// link).
