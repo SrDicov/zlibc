@@ -190,8 +190,7 @@ extern "C" {
 
 /// C-style dispatcher: `__syscall!(SYS_WRITE, fd, buf, len)`.
 #[macro_export]
-macro_rules! __syscall {
-    ($n:expr) => {
+macro_rules! __syscall {    ($n:expr) => {
         unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall0($n)) }
     };
     ($n:expr, $a1:expr) => {
@@ -248,4 +247,31 @@ macro_rules! __syscall {
             ))
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    /// Proves raw dispatch works on real Linux: SYS_getpid (39, x86_64)
+    /// takes no args and must return a positive pid. Also forces the
+    /// linker to retain the syscall path in the test binary.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn raw_syscall_getpid_works() {
+        let pid = unsafe { crate::syscall::syscall0(39) };
+        assert!(pid > 0, "getpid returned {pid}");
+    }
+
+    /// Proves `___errno_location` exists as a WEAK alias: taking its
+    /// address must link fine and yield null while `__errno_location`
+    /// stays undefined (Wave 2/3 defines it — update this test then).
+    /// A missing alias would fail here at link time instead.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn weak_alias_is_weak_undefined() {
+        extern "C" {
+            static ___errno_location: u8;
+        }
+        let addr = unsafe { core::ptr::addr_of!(___errno_location) as *const u8 as usize };
+        assert_eq!(addr, 0, "weak alias unexpectedly resolved");
+    }
 }
