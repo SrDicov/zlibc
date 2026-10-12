@@ -621,7 +621,8 @@ pub unsafe fn map_object(fd: c_int, p: *mut Dso) -> c_int {
             phnum,
             phentsize,
         )
-    } != 0 {
+    } != 0
+    {
         crate::__syscall!(SYS_MUNMAP, map, span);
         return -1;
     }
