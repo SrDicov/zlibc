@@ -613,7 +613,7 @@ pub unsafe fn map_object(fd: c_int, p: *mut Dso) -> c_int {
         d.map_len = span;
     }
     let ph_addr = (bias as *mut u8).wrapping_add(ehdr.e_phoff as usize);
-    if unsafe { dso_from_phdr(p, bias as *mut u8, ph_addr, phnum, phentsize) } != 0 {
+    if unsafe { dso_from_phdr(p, bias as *mut u8, ph_addr as *const Elf64Phdr, phnum, phentsize) } != 0 {
         crate::__syscall!(SYS_MUNMAP, map, span);
         return -1;
     }
