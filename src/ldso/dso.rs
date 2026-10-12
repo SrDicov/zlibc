@@ -60,6 +60,7 @@ use super::SYS_MPROTECT;
 use super::SYS_MUNMAP;
 use super::SYS_OPENAT;
 use super::SYS_PREAD64;
+
 use crate::abi::PthreadT;
 
 /// musl `DYN_CNT` (`src/internal/dynlink.h:104`): dense dynamic range.
@@ -640,6 +641,7 @@ mod tests {
     use super::gnu_hash;
     use super::search_vec;
     use super::sysv_hash;
+
     use core::mem::offset_of;
     use core::mem::size_of;
 
