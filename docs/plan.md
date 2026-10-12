@@ -85,6 +85,13 @@ Evidence correction: musl x86_64 provides `__syscall0..6`
 CI green on `testing` + extended asserts + `nm` output. Then merge
 `testing → main`, tag `v0.1`.
 
+CLOSED (v0.1): 38 probe values green; `syscall0..6` + `__syscall!`;
+`getpid` functional test proves real dispatch; `weak_alias!` +
+`___errno_location` alias proven by address-identity test. Advances:
+compat ABI (1), 100% Rust no_std sin dependencias (2). Sin debilitar
+ningún principio (revisión de cierre: 3 neutro, 4 sin bugs musl nuevos,
+5/6/7/8 intactos). `__errno_location` real diferido a Ola 2/3 (E0658).
+
 ## Later waves (summary; contracts written before each launches)
 
 - **Wave 2** — boot + ldso: B1 `src/start.rs` (`_start`, `__libc_start_main`,
