@@ -16,7 +16,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn run(cmd: &mut Command, what: &str) -> String {
-    let out = cmd.output().unwrap_or_else(|e| panic!("zlibc build.rs: cannot run {what}: {e}"));
+    let out = cmd
+        .output()
+        .unwrap_or_else(|e| panic!("zlibc build.rs: cannot run {what}: {e}"));
     if !out.status.success() {
         panic!(
             "zlibc build.rs: {what} failed:\n{}",
@@ -37,8 +39,15 @@ fn main() {
     }
 
     let musl = PathBuf::from(env::var("MUSL_SRC").unwrap_or_else(|_| "/home/dicov/musl".into()));
-    for p in ["include/stdio.h", "src/internal/stdio_impl.h", "tools/mkalltypes.sed"] {
-        assert!(musl.join(p).exists(), "zlibc build.rs: MUSL_SRC={musl:?} missing {p}");
+    for p in [
+        "include/stdio.h",
+        "src/internal/stdio_impl.h",
+        "tools/mkalltypes.sed",
+    ] {
+        assert!(
+            musl.join(p).exists(),
+            "zlibc build.rs: MUSL_SRC={musl:?} missing {p}"
+        );
     }
 
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
@@ -64,7 +73,10 @@ fn main() {
 
     // bits/syscall.h — same two steps as the musl Makefile (cp + append).
     let sc_in = musl.join("arch/x86_64/bits/syscall.h.in");
-    assert!(sc_in.exists(), "zlibc build.rs: missing arch/x86_64/bits/syscall.h.in");
+    assert!(
+        sc_in.exists(),
+        "zlibc build.rs: missing arch/x86_64/bits/syscall.h.in"
+    );
     let mut sc = fs::read_to_string(&sc_in).unwrap();
     for line in sc.clone().lines() {
         // sed -n -e s/__NR_/SYS_/p
@@ -77,12 +89,7 @@ fn main() {
     // Compile the probe like musl compiles itself: no host libc headers.
     let probe_bin = out.join("probe");
     let st = Command::new("gcc")
-        .args([
-            "-std=c99",
-            "-ffreestanding",
-            "-nostdinc",
-            "-o",
-        ])
+        .args(["-std=c99", "-ffreestanding", "-nostdinc", "-o"])
         .arg(&probe_bin)
         .arg("probe/probe.c")
         .arg(format!("-I{}", gen.display()))
@@ -94,7 +101,10 @@ fn main() {
         .current_dir(Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap()))
         .status()
         .unwrap_or_else(|e| panic!("zlibc build.rs: cannot run gcc (is it installed?): {e}"));
-    assert!(st.success(), "zlibc build.rs: gcc failed to compile probe/probe.c");
+    assert!(
+        st.success(),
+        "zlibc build.rs: gcc failed to compile probe/probe.c"
+    );
 
     let measured = run(Command::new(&probe_bin), "probe binary");
 
@@ -104,11 +114,16 @@ fn main() {
         let (k, v) = line
             .split_once(' ')
             .unwrap_or_else(|| panic!("zlibc build.rs: bad probe line: {line:?}"));
-        let _: u64 = v.parse().unwrap_or_else(|_| panic!("zlibc build.rs: bad value: {line:?}"));
+        let _: u64 = v
+            .parse()
+            .unwrap_or_else(|_| panic!("zlibc build.rs: bad value: {line:?}"));
         rs.push_str(&format!("pub const PROBE_{k}: usize = {v};\n"));
         n += 1;
     }
-    assert!(n >= 30, "zlibc build.rs: probe emitted only {n} values, expected 30+");
+    assert!(
+        n >= 30,
+        "zlibc build.rs: probe emitted only {n} values, expected 30+"
+    );
     fs::write(out.join("abi_probed.rs"), rs).unwrap();
     println!("cargo:warning=zlibc ABI probe: {n} sizes/offsets measured from {musl:?}");
 }

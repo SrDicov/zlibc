@@ -105,7 +105,10 @@ macro_rules! __syscall {
     ($n:expr, $a1:expr, $a2:expr, $a3:expr) => {
         unsafe {
             $crate::syscall::syscall_ret($crate::syscall::syscall3(
-                $n, $a1 as usize, $a2 as usize, $a3 as usize,
+                $n,
+                $a1 as usize,
+                $a2 as usize,
+                $a3 as usize,
             ))
         }
     };
