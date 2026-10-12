@@ -10,6 +10,8 @@
 use core::ffi::{c_char, c_int, c_void};
 use core::mem::size_of;
 
+use super::Elf64Ehdr;
+use super::Elf64Phdr;
 use super::AT_FDCWD;
 use super::DT_GNU_HASH;
 use super::DT_HASH;
@@ -37,8 +39,6 @@ use super::EM_X86_64;
 use super::ET_DYN;
 use super::ET_EXEC;
 use super::EV_CURRENT;
-use super::Elf64Ehdr;
-use super::Elf64Phdr;
 use super::MAP_ANONYMOUS;
 use super::MAP_FIXED;
 use super::MAP_PRIVATE;
