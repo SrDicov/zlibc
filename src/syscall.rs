@@ -218,8 +218,14 @@ macro_rules! __syscall {
         unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall4(n, a1, a2, a3, a4)) }
     }};
     ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr) => {{
-        let (n, a1, a2, a3, a4, a5) =
-            ($n, $a1 as usize, $a2 as usize, $a3 as usize, $a4 as usize, $a5 as usize);
+        let (n, a1, a2, a3, a4, a5) = (
+            $n,
+            $a1 as usize,
+            $a2 as usize,
+            $a3 as usize,
+            $a4 as usize,
+            $a5 as usize,
+        );
         unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall5(n, a1, a2, a3, a4, a5)) }
     }};
     ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr, $a6:expr) => {{
