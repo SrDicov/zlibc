@@ -100,20 +100,18 @@ pub static mut __stack_chk_guard: usize = 0;
 /// and never callable from Rust.
 #[cfg(not(test))]
 #[cfg(target_arch = "x86_64")]
-#[naked]
+#[unsafe(naked)]
 #[no_mangle]
 pub unsafe extern "C" fn _start() -> ! {
-    unsafe {
-        core::arch::naked_asm!(
-            "xor rbp, rbp",
-            "mov rdi, rsp",
-            ".weak _DYNAMIC",
-            ".hidden _DYNAMIC",
-            "lea rsi, [rip + _DYNAMIC]",
-            "and rsp, -16",
-            "call _start_c",
-        )
-    }
+    core::arch::naked_asm!(
+        "xor rbp, rbp",
+        "mov rdi, rsp",
+        ".weak _DYNAMIC",
+        ".hidden _DYNAMIC",
+        "lea rsi, [rip + _DYNAMIC]",
+        "and rsp, -16",
+        "call _start_c",
+    )
 }
 
 /// musl `_start_c` (crt/crt1.c:14-19): `argc = p[0]`, `argv = p+1`, then
@@ -289,7 +287,7 @@ pub extern "C" fn exit(code: c_int) -> ! {
     unsafe { __funcs_on_exit() };
     unsafe { __libc_exit_fini() };
     unsafe { __stdio_exit() };
-    unsafe { _Exit(code) }
+    _Exit(code)
 }
 
 /// musl `exit.c:37` (`static volatile int exit_lock[1]`), as an atomic:
