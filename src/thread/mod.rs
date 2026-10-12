@@ -220,10 +220,11 @@ pub struct Thread {
     // stdio locks, dlerror buffer. Each returns with its owning wave.
 }
 
-/// Hide the `__pthread_*` impls (musl marks them hidden, e.g.
-/// `clone.s:3`, `__set_thread_area.s:4`): in test builds this keeps our
-/// symbols from interposing host glibc/std; in real links the weak
-/// aliases below are the public face.
+// Hide the `__pthread_*` impls (musl marks them hidden, e.g.
+// `clone.s:3`, `__set_thread_area.s:4`): in test builds this keeps our
+// symbols from interposing host glibc/std; in real links the weak
+// aliases below are the public face. Plain comment: rustdoc documents
+// no macro invocation.
 #[cfg(target_arch = "x86_64")]
 core::arch::global_asm!(
     ".hidden __pthread_create\n.hidden __pthread_join\n.hidden __pthread_detach\n\
