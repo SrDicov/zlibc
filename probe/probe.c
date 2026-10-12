@@ -11,6 +11,7 @@
 #include <locale.h> /* locale_t, needed by pthread_impl.h */
 #include "stdio_impl.h" /* struct _IO_FILE definition (public stdio.h only forward-declares it) */
 #include "pthread_impl.h"
+#include <pthread.h> /* pthread_t (already pulled in via pthread_impl.h; explicit here for the SIZE_PTHREAD_T probe) */
 
 #define E(n, v) printf(#n " %lu\n", (unsigned long)(v))
 
@@ -55,5 +56,8 @@ int main(void)
 	E(OFF_PTHREAD_DTV, offsetof(struct pthread, dtv));
 	E(OFF_PTHREAD_SYSINFO, offsetof(struct pthread, sysinfo));
 	E(OFF_PTHREAD_CANARY, offsetof(struct pthread, canary));
+
+	/* pthread_t (include/alltypes.h.in: struct __pthread * on x86_64). */
+	E(SIZE_PTHREAD_T, sizeof(pthread_t));
 	return 0;
 }
