@@ -593,8 +593,7 @@ pub unsafe fn map_object(fd: c_int, p: *mut Dso) -> c_int {
             }
             // The phdr table normally ships inside a LOAD at offset 0.
             if ph.p_offset <= ehdr.e_phoff
-                && ehdr.e_phoff.wrapping_add(table)
-                    <= ph.p_offset.wrapping_add(ph.p_filesz)
+                && ehdr.e_phoff.wrapping_add(table) <= ph.p_offset.wrapping_add(ph.p_filesz)
             {
                 phdr_ok = true;
             }
@@ -621,19 +620,17 @@ pub unsafe fn map_object(fd: c_int, p: *mut Dso) -> c_int {
 
 #[cfg(test)]
 mod tests {
+    use super::super::Elf64Dyn;
+    use super::super::Elf64Ehdr;
+    use super::super::Elf64Phdr;
     use super::super::DT_GNU_HASH;
     use super::super::DT_HASH;
     use super::super::DT_NULL;
     use super::super::DT_STRTAB;
     use super::super::DT_SYMTAB;
     use super::super::DT_VERSYM;
-    use super::super::Elf64Dyn;
-    use super::super::Elf64Ehdr;
-    use super::super::Elf64Phdr;
     use super::super::PT_DYNAMIC;
     use super::super::PT_LOAD;
-    use super::DYN_CNT;
-    use super::Dso;
     use super::decode_dyn;
     use super::decode_vec;
     use super::dso_from_phdr;
@@ -641,6 +638,8 @@ mod tests {
     use super::gnu_hash;
     use super::search_vec;
     use super::sysv_hash;
+    use super::Dso;
+    use super::DYN_CNT;
 
     use core::mem::offset_of;
     use core::mem::size_of;
