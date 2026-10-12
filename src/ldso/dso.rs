@@ -524,7 +524,9 @@ pub unsafe fn map_object(fd: c_int, p: *mut Dso) -> c_int {
         span,
         PROT_NONE,
         MAP_PRIVATE | MAP_ANONYMOUS,
-        -1,
+        // -1 fd for MAP_ANONYMOUS, spelled as usize::MAX: `-1 as usize`
+        // parses as `-(1 as usize)` and does not compile.
+        usize::MAX,
         0
     );
     if map == -1 {
@@ -585,7 +587,7 @@ pub unsafe fn map_object(fd: c_int, p: *mut Dso) -> c_int {
                     .wrapping_add(ph.p_vaddr as usize)
                     .wrapping_add(ph.p_filesz as usize);
                 let zn = (ph.p_memsz as usize) - (ph.p_filesz as usize);
-                unsafe { zero_range(zb, zn) };
+                unsafe { zero_range(zb as *mut u8, zn) };
             }
             if crate::__syscall!(SYS_MPROTECT, s, e - s, prot) == -1 {
                 failed = true;
