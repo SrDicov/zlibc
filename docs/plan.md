@@ -198,6 +198,14 @@ first, plus `reloc_all` for the IRELATIVE path):
 ### Wave 2 gate
 `cargo test` green + a follow-up wave boots a binary (full hello-world
 runs when B3 + Wave 3 threads exist; this wave delivers the pieces).
+
+CLOSED (v0.2): `_start`/`__libc_start_main`/SSP/`exit`, ELF64 + `Dso`
+mirror, sysv/gnu hashes, ELF loader, `do_relocs` + lookup + lazy,
+panic handler, mem trio — 112 probe values, 34 tests green. Advances:
+compat ABI (1), POSIX (arranque/carga como contrato) (3). Sin debilitar
+principios (revisión de cierre: 2/5/6/7/8 intactos; 4: IRELATIVE
+documentado como extensión deliberada — musl lo rechaza, ningún binario
+musl lo contiene, sin ruptura de compat).
 ## Wave 3 contract — pthreads + futex (x86_64)
 
 Wave goal line: esta ola avanza **compat ABI + POSIX** (hilos y
