@@ -59,5 +59,19 @@ int main(void)
 
 	/* pthread_t (include/alltypes.h.in: struct __pthread * on x86_64). */
 	E(SIZE_PTHREAD_T, sizeof(pthread_t));
+
+	/* pthread_mutex_t overlay (src/internal/pthread_impl.h:86-91). */
+	E(SIZE_MUTEX, sizeof(pthread_mutex_t));
+	E(OFF_M_TYPE, (size_t)&((pthread_mutex_t *)0)->_m_type);
+	E(OFF_M_LOCK, (size_t)&((pthread_mutex_t *)0)->_m_lock);
+	E(OFF_M_WAITERS, (size_t)&((pthread_mutex_t *)0)->_m_waiters);
+	E(OFF_M_COUNT, (size_t)&((pthread_mutex_t *)0)->_m_count);
+
+	/* pthread_cond_t overlay (src/internal/pthread_impl.h:92-97). */
+	E(SIZE_COND, sizeof(pthread_cond_t));
+	E(OFF_C_SEQ, (size_t)&((pthread_cond_t *)0)->_c_seq);
+	E(OFF_C_WAITERS, (size_t)&((pthread_cond_t *)0)->_c_waiters);
+	E(OFF_C_CLOCK, (size_t)&((pthread_cond_t *)0)->_c_clock);
+	E(OFF_C_LOCK, (size_t)&((pthread_cond_t *)0)->_c_lock);
 	return 0;
 }
