@@ -37,3 +37,18 @@ static ERRNO: ErrnoCell = ErrnoCell(UnsafeCell::new(0));
 pub unsafe extern "C" fn __errno_location() -> *mut c_int {
     ERRNO.0.get()
 }
+
+// NOTE: musl defines `___errno_location` as a WEAK alias of
+// `__errno_location` (src/errno/__errno_location.c:9), but a `.set` to an
+// externally-defined target leaves no linkable weak record with this
+// toolchain's assembler (proven by link failure in CI), so the alias is
+// a plain forwarding definition instead. Observable contract is
+// identical today (one shared cell); revisit when real linking lands.
+//
+// # Safety
+//
+// Same contract as [`__errno_location`].
+#[no_mangle]
+pub unsafe extern "C" fn ___errno_location() -> *mut c_int {
+    __errno_location()
+}

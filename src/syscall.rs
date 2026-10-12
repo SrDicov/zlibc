@@ -262,22 +262,21 @@ mod tests {
         assert!(pid > 0, "getpid returned {pid}");
     }
 
-    /// Proves `___errno_location` exists as an alias of
-    /// `__errno_location`: both addresses must coincide. Both resolve to
-    /// zlibc's own definition (our static interposes the host's shared
-    /// one), so this holds on any host. A missing alias would fail here
-    /// at link time instead. The alias stays WEAK (see musl
-    /// src/errno/__errno_location.c:9), so a future strong definition
-    /// overrides it without duplicate-symbol errors.
+    /// Proves both errno names yield the same cell (musl weak-alias
+    /// contract, src/errno/__errno_location.c:9), and that the
+    /// `syscall_ret` error path stores through it. A missing
+    /// `___errno_location` would fail here at link time instead.
     #[cfg(target_arch = "x86_64")]
     #[test]
-    fn weak_alias_targets_errno_location() {
+    fn errno_aliases_share_one_cell() {
         extern "C" {
-            static ___errno_location: u8;
-            fn __errno_location() -> *mut core::ffi::c_int;
+            fn ___errno_location() -> *mut core::ffi::c_int;
         }
-        let alias = core::ptr::addr_of!(___errno_location) as usize;
-        let target = __errno_location as *const () as usize;
-        assert_eq!(alias, target, "weak alias does not track __errno_location");
+        unsafe {
+            assert_eq!(___errno_location(), crate::errno::__errno_location());
+            assert_eq!(crate::syscall::syscall_ret(-2), -1);
+            assert_eq!(*crate::errno::__errno_location(), 2);
+            assert_eq!(crate::syscall::syscall_ret(7), 7);
+        }
     }
 }
