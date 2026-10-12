@@ -94,10 +94,73 @@ ningún principio (revisión de cierre: 3 neutro, 4 sin bugs musl nuevos,
 
 ## Later waves (summary; contracts written before each launches)
 
-- **Wave 2** — boot + ldso: B1 `src/start.rs` (`_start`, `__libc_start_main`,
-  auxv, SSP, `struct __libc`, exit path); B2 `src/ldso/dso.rs` + hashes;
-  B3 `src/ldso/reloc.rs`; B4 `src/panic.rs` + `src/mem/`.
-  Gate: minimal dynamic binary + hello world linked against zlibc run.
+## Wave 2 contract — boot + ldso (x86_64)
+
+Wave goal line: esta ola avanza **compat ABI + POSIX** (arranque y carga
+dinámica son contrato observable), sin comprometer los demás.
+
+Evidence (all verified in /home/dicov/musl):
+- `_start` asm: arch/x86_64/crt_arch.h (xor rbp, rdi=rsp, align rsp 16,
+  call `_start_c`; also `.weak/.hidden _DYNAMIC` + lea — keep, documented).
+- `_start_c(long *p)`: argc=p[0], argv=p+1, then
+  `__libc_start_main(main, argc, argv, _init, _fini, 0)` (crt/crt1.c).
+- `struct __libc` exact fields: src/internal/libc.h:20-31
+  (can_do_threads, threaded, secure, need_locks, threads_minus_1,
+  auxv, tls_head, tls_size/align/cnt, page_size, global_locale).
+- `exit()` order: src/exit/exit.c — exit_lock CAS → `__funcs_on_exit()`
+  → `__libc_exit_fini()` (fini_array) → `__stdio_exit()` → `_Exit()`.
+  atexit/stdio hooks are WEAK dummies until Waves 3/4 define them.
+- `struct dso` exact fields: ldso/dynlink.c:67-121 (x86_64: no
+  DL_FDPIC → `base` first, `loadmap` pointer at tail; `buf[]` flex tail
+  contributes 0 to sizeof — omit in Rust, assert still holds).
+- `struct tls_module`: src/internal/libc.h:14-18
+  (next, image, len, size, align, offset). Lives in `crate::ldso::dso`;
+  B1 uses it only through that path.
+- Hashes: `sysv_hash`/`gnu_hash` ldso/dynlink.c:241-264. Pure fns.
+- SSP: `__stack_chk_guard` + `__init_ssp` in src/env/__stack_chk_fail.c
+  (memcpy entropy bytes, else `addr*1103515245` fallback).
+- Syscalls needed: SYS_exit=60, SYS_exit_group=231, SYS_mmap=9
+  (arch/x86_64/bits/syscall.h.in). Hardcode `pub const` with TODO to
+  generate from bits/, same as existing SYS_WRITE.
+- Existing `#[panic_handler]` in src/lib.rs MOVES to B4's src/panic.rs
+  (B4 proposes the lib.rs deletion patch; coordinator applies).
+
+### B1 — src/start.rs (worktree ../zlibc-b1, owns src/start.rs)
+`_start` (naked, replicates crt_arch.h), `_start_c`, `__libc_start_main`
+(envp→auxv scan, `__hwcap`, `__init_ssp(AT_RANDOM)`, secure check per
+src/env/__libc_start_main.c:42-43, populate `__libc`), `struct __libc`
+mirror HERE (not abi.rs — avoids contention), `exit()` with
+single-threaded `shortcut:` (no TID yet; full lock when pthreads land),
+weak dummies for `__funcs_on_exit`/`__stdio_exit` via `weak_alias!`.
+Tests: pure-fn auxv-scan tests only — never execute `_start`/`exit` in
+tests. Proposes `pub mod start;` line for coordinator.
+
+### B2 — src/ldso/ (worktree ../zlibc-b2, owns src/ldso/)
+`src/ldso/mod.rs` + `src/ldso/dso.rs`: ELF64 repr(C) types as needed
+(verify against musl include/elf.h), FULL `Dso` mirror + probe asserts
+(B2 proposes probe.c lines + lib.rs asserts; coordinator applies),
+`sysv_hash`/`gnu_hash` with hand-derived vectors (document derivation;
+static fns in dynlink.c can't be probed and copying them into probe.c
+would break the clean-room rule), DSO list wiring (next/prev), ELF
+map/load populating dynv/syms/strings/hashtab via DT_* tags (mmap/open/
+read via existing `__syscall!`). Relocation APPLICATION is B3, not B2.
+Proposes `pub mod ldso;` line for coordinator.
+
+### B4 — src/panic.rs + src/mem/ (worktree ../zlibc-b4, owns both)
+Upgraded panic handler (fd-2 message via raw write + exit_group; fixed
+stack buffer + core::fmt, no alloc), proposes lib.rs deletion patch for
+the old `loop {}` handler. `memcpy`/`memmove`/`memset` with exact musl
+signatures, correct byte loops + `shortcut:` (word-at-a-time when
+measured, per principle 5). Tests call `crate::mem::*` directly
+(never link against host symbols).
+
+### B3 — src/ldso/reloc.rs (launches after B2 lands)
+GOT/PLT RELATIVE relocs, lazy binding stubs, TLSDESC basics. Contract
+written from B2's merged `Dso`. Not launched yet.
+
+### Wave 2 gate
+`cargo test` green + a follow-up wave boots a binary (full hello-world
+runs when B3 + Wave 3 threads exist; this wave delivers the pieces).
 - **Wave 3** — pthreads: C1 create/clone/TLS/`__unmapself`; C2 futex +
   sync (futex interface fixed first so C1/C2 parallelize); C3 synccall.
   Gate: N-thread + mutex/condvar test, no deadlocks.
