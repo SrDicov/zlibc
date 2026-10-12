@@ -44,10 +44,10 @@ pub unsafe extern "C" fn __errno_location() -> *mut c_int {
 // toolchain's assembler (proven by link failure in CI), so the alias is
 // a plain forwarding definition instead. Observable contract is
 // identical today (one shared cell); revisit when real linking lands.
-//
-// # Safety
-//
-// Same contract as [`__errno_location`].
+///
+/// # Safety
+///
+/// Same contract as [`__errno_location`].
 #[no_mangle]
 pub unsafe extern "C" fn ___errno_location() -> *mut c_int {
     unsafe { __errno_location() }
