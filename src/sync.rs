@@ -616,7 +616,7 @@ mod tests {
     /// (house rule, cf. `src/mem` tests).
     #[test]
     fn mutex_threaded_counter_is_exact() {
-        static MUT: MutexT = [0; 5];
+        static mut MUT: MutexT = [0; 5];
         static COUNT: AtomicU64 = AtomicU64::new(0);
         const NTHREADS: u32 = 8;
         const PER_THREAD: u32 = 2000;
@@ -652,7 +652,7 @@ mod tests {
     #[test]
     fn mutex_kinds_trylock_unlock_errors() {
         unsafe {
-            let m: MutexT = [0; 5];
+            let mut m: MutexT = [0; 5];
             let mp = core::ptr::addr_of_mut!(m);
             let err = MutexAttrT { attr: 2 }; // ERRORCHECK
             assert_eq!(crate::sync::pthread_mutex_init(mp, &err), 0);
@@ -693,8 +693,8 @@ mod tests {
     /// no timing assumptions.
     #[test]
     fn cond_signal_rendezvous() {
-        static M: MutexT = [0; 5];
-        static C: CondT = [0; 6];
+        static mut M: MutexT = [0; 5];
+        static mut C: CondT = [0; 6];
         static ENTERED: AtomicU64 = AtomicU64::new(0);
         static FLAG: AtomicU64 = AtomicU64::new(0);
 
@@ -727,8 +727,8 @@ mod tests {
     /// Three waiters rendezvous as above; one broadcast wakes all three.
     #[test]
     fn cond_broadcast_wakes_all() {
-        static M: MutexT = [0; 5];
-        static C: CondT = [0; 6];
+        static mut M: MutexT = [0; 5];
+        static mut C: CondT = [0; 6];
         static ENTERED: AtomicU64 = AtomicU64::new(0);
         static FLAG: AtomicU64 = AtomicU64::new(0);
         static WOKE: AtomicU64 = AtomicU64::new(0);
