@@ -638,8 +638,8 @@ mod tests {
     use super::gnu_hash;
     use super::search_vec;
     use super::sysv_hash;
-    use super::TlsModule;
     use super::Dso;
+    use super::TlsModule;
     use super::DYN_CNT;
 
     use core::mem::offset_of;
