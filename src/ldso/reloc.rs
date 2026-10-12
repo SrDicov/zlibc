@@ -413,8 +413,8 @@ pub unsafe fn do_relocs(dso: *mut Dso, rel: *mut usize, rel_size: usize, stride:
             };
 
             let sym_idx = r_sym(r_info);
-            let def_dso: *mut Dso;
-            let def_sym: *mut Elf64Sym;
+            let mut def_dso: *mut Dso;
+            let mut def_sym: *mut Elf64Sym;
             let mut ref_sym: *mut Elf64Sym = core::ptr::null_mut();
             let mut name: *const c_char = core::ptr::null();
             if sym_idx != 0 {
