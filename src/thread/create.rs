@@ -12,7 +12,7 @@ use core::sync::atomic::Ordering;
 use crate::abi::PthreadT;
 use crate::futex::{futex_wait_private, futex_wake_private};
 use crate::ldso::{MAP_ANONYMOUS, MAP_PRIVATE, PAGE_SIZE, PROT_NONE, PROT_READ, PROT_WRITE};
-use crate::syscall::{syscall1, syscall3, syscall6, syscall_ret};
+use crate::syscall::{syscall1, syscall2, syscall3, syscall6, syscall_ret};
 
 use super::tls::{copy_tls, ensure_main_tp, get_tp, set_tp};
 use super::unmapself::__unmapself;
@@ -303,7 +303,7 @@ pub unsafe extern "C" fn __pthread_create(
                 PROT_NONE as usize,
             ));
             if r == -1 {
-                let _ = syscall_ret(syscall3(SYS_MUNMAP, map as usize, size));
+                let _ = syscall_ret(syscall2(SYS_MUNMAP, map as usize, size));
                 return EAGAIN;
             }
         }
@@ -343,7 +343,7 @@ pub unsafe extern "C" fn __pthread_create(
             td as usize,
         );
         if r < 0 {
-            let _ = syscall_ret(syscall3(SYS_MUNMAP, base as usize, size));
+            let _ = syscall_ret(syscall2(SYS_MUNMAP, base as usize, size));
             return EAGAIN;
         }
         res.write(td as PthreadT);
@@ -395,7 +395,7 @@ pub unsafe extern "C" fn __pthread_join(t: PthreadT, res: *mut *mut c_void) -> c
         let base = (*td).map_base;
         let size = (*td).map_size;
         if !base.is_null() {
-            let _ = crate::__syscall!(SYS_MUNMAP, base, size);
+            let _ = syscall_ret(syscall2(SYS_MUNMAP, base as usize, size));
         }
         0
     }
