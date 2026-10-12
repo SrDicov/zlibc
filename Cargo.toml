@@ -1,0 +1,19 @@
+[package]
+name = "zlibc"
+version = "0.1.0"
+edition = "2021"
+description = "Rust rewrite of musl libc (ABI-exact, no_std)"
+license = "MIT"
+
+[lib]
+# rlib for now; cdylib/staticlib once the linkable libc is assembled.
+crate-type = ["rlib"]
+
+[dependencies]
+# Runtime helpers Rust cannot codegen inline (e.g. __udivti3 on some
+# archs). Foundational: without this, no no_std libc links.
+# If the "rust" feature name drifts upstream, adjust here.
+compiler_builtins = { version = "0.1", default-features = false, features = ["rust"] }
+
+[build-dependencies]
+# None: build.rs shells out to the host gcc directly (see build.rs).

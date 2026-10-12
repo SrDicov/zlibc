@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  MUSL_SRC: ${{ github.workspace }}/musl
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch musl headers source (SrDicov mirror)
+        run: git clone --depth 1 https://github.com/SrDicov/musl.git "$MUSL_SRC"
+
+      - name: Install Rust stable + musl target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+          components: clippy, rustfmt
+
+      - name: rustfmt
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build (host)
+        run: cargo build --verbose
+
+      - name: Build (x86_64-unknown-linux-musl)
+        run: cargo build --verbose --target x86_64-unknown-linux-musl
+
+      - name: Test (runs build.rs ABI probe + asserts + unit tests)
+        run: cargo test --verbose
