@@ -2,10 +2,12 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod abi;
+pub mod futex;
 pub mod mem;
 pub mod panic;
 pub mod start;
 pub mod symbols;
+pub mod sync;
 pub mod syscall;
 
 // OUT_DIR/abi_probed.rs is emitted by build.rs with sizes/offsets
@@ -63,3 +65,23 @@ const _: () = assert!(PROBE_OFF_PTHREAD_SYSINFO == offset_of!(abi::PthreadHead, 
 const _: () = assert!(PROBE_OFF_PTHREAD_CANARY == offset_of!(abi::PthreadHead, canary));
 #[cfg(target_arch = "x86_64")]
 const _: () = assert!(PROBE_SIZE_PTHREAD_T == size_of::<abi::PthreadT>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_MUTEX == 40);
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_M_TYPE == 0);
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_M_LOCK == 4);
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_M_WAITERS == 8);
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_M_COUNT == 20);
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_COND == 48);
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_C_SEQ == 8);
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_C_WAITERS == 12);
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_C_CLOCK == 16);
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_C_LOCK == 32);
