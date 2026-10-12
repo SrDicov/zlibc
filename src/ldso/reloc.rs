@@ -81,7 +81,7 @@ const STB_LOCAL: u8 = 0; // elf.h:499
 const STB_WEAK: u8 = 2; // elf.h:501
 const STT_TLS: u8 = 6; // elf.h:515
 const SHN_UNDEF: u16 = 0; // elf.h:355
-// musl OK_TYPES / OK_BINDS (ldso/dynlink.c:308-309).
+                          // musl OK_TYPES / OK_BINDS (ldso/dynlink.c:308-309).
 const OK_TYPES: u32 = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 5) | (1 << 6);
 const OK_BINDS: u32 = (1 << 1) | (1 << 2) | (1 << 10);
 // x86_64 defines no DTP_OFFSET: default 0 (pthread_impl.h:113-114).
@@ -314,11 +314,7 @@ unsafe fn gnu_lookup_filtered(
 ///
 /// Every `Dso` in the chain must satisfy the table validity of
 /// [`sysv_lookup`]; `s` must be NUL-terminated.
-unsafe fn find_sym(
-    head: *mut Dso,
-    s: *const c_char,
-    need_def: bool,
-) -> (*mut Dso, *mut Elf64Sym) {
+unsafe fn find_sym(head: *mut Dso, s: *const c_char, need_def: bool) -> (*mut Dso, *mut Elf64Sym) {
     unsafe {
         let gh = gnu_hash(s);
         let mut h: u32 = 0;
@@ -519,10 +515,16 @@ pub unsafe fn do_relocs(dso: *mut Dso, rel: *mut usize, rel_size: usize, stride:
                 }
                 REL_TPOFF => {
                     // No TLS_ABOVE_TP on x86_64 (dynlink.c:512-514).
-                    *addr = tls_val.wrapping_sub((*def_dso).tls.offset).wrapping_add(addend);
+                    *addr = tls_val
+                        .wrapping_sub((*def_dso).tls.offset)
+                        .wrapping_add(addend);
                 }
                 REL_TPOFF_NEG => {
-                    *addr = (*def_dso).tls.offset.wrapping_sub(tls_val).wrapping_add(addend);
+                    *addr = (*def_dso)
+                        .tls
+                        .offset
+                        .wrapping_sub(tls_val)
+                        .wrapping_add(addend);
                 }
                 REL_IRELATIVE => {
                     // Contract-only (musl would fatal): resolve like glibc,
@@ -543,8 +545,7 @@ pub unsafe fn do_relocs(dso: *mut Dso, rel: *mut usize, rel_size: usize, stride:
                         // no allocator until Wave 4.
                         fatal((*dso).name, name, b"dynamic TLSDESC needs allocator");
                     }
-                    let desc: usize =
-                        transmute::<extern "C" fn() -> isize, usize>(tlsdesc_static);
+                    let desc: usize = transmute::<extern "C" fn() -> isize, usize>(tlsdesc_static);
                     *addr.add(0) = desc;
                     *addr.add(1) = tls_val.wrapping_sub((*def_dso).tls.offset).wrapping_add(a);
                 }
@@ -631,7 +632,14 @@ mod tests {
         let mut dso: Dso = unsafe { core::mem::zeroed() };
         dso.base = base;
         let mut rela = [0x10usize, info(0, REL_RELATIVE), 0x20];
-        unsafe { do_relocs(&mut dso as *mut Dso, rela.as_mut_ptr(), 3 * size_of::<usize>(), 3) };
+        unsafe {
+            do_relocs(
+                &mut dso as *mut Dso,
+                rela.as_mut_ptr(),
+                3 * size_of::<usize>(),
+                3,
+            )
+        };
         assert_eq!(unsafe { *at(base, 0x10) }, base as usize + 0x20);
     }
 
@@ -639,7 +647,9 @@ mod tests {
     fn symbolic_self_def_adds_sym_and_addend() {
         let mut mem = [0u8; 64];
         let base = mem.as_mut_ptr();
-        unsafe { *at(base, 0x08) = 0xdead; }
+        unsafe {
+            *at(base, 0x08) = 0xdead;
+        }
         let mut syms = [sym(0, 0, 0, 0, 0), sym(0, 0x12, 1, 0x20, 0)];
         let mut strs = *b"foo\0";
         let mut ht = [0u32; 5];
@@ -655,7 +665,14 @@ mod tests {
             );
         }
         let mut rela = [0x08usize, info(1, REL_SYMBOLIC), 5];
-        unsafe { do_relocs(&mut dso as *mut Dso, rela.as_mut_ptr(), 3 * size_of::<usize>(), 3) };
+        unsafe {
+            do_relocs(
+                &mut dso as *mut Dso,
+                rela.as_mut_ptr(),
+                3 * size_of::<usize>(),
+                3,
+            )
+        };
         assert_eq!(unsafe { *at(base, 0x08) }, base as usize + 0x20 + 5);
     }
 
@@ -664,7 +681,11 @@ mod tests {
         let mut mem = [0u8; 64];
         let base = mem.as_mut_ptr();
         // sym 1 "foo": GLOBAL FUNC @0x20; sym 2 "bar": GLOBAL OBJECT @0x30.
-        let mut syms = [sym(0, 0, 0, 0, 0), sym(0, 0x12, 1, 0x20, 0), sym(4, 0x11, 1, 0x30, 8)];
+        let mut syms = [
+            sym(0, 0, 0, 0, 0),
+            sym(0, 0x12, 1, 0x20, 0),
+            sym(4, 0x11, 1, 0x30, 8),
+        ];
         let mut strs = *b"foo\0bar\0";
         let mut ht = [0u32; 6];
         let mut dso: Dso = unsafe { core::mem::zeroed() };
@@ -678,8 +699,22 @@ mod tests {
                 ht.as_mut_ptr(),
             );
         }
-        let mut rela = [0x08usize, info(1, REL_GOT), 7, 0x10usize, info(2, REL_PLT), 0];
-        unsafe { do_relocs(&mut dso as *mut Dso, rela.as_mut_ptr(), 6 * size_of::<usize>(), 3) };
+        let mut rela = [
+            0x08usize,
+            info(1, REL_GOT),
+            7,
+            0x10usize,
+            info(2, REL_PLT),
+            0,
+        ];
+        unsafe {
+            do_relocs(
+                &mut dso as *mut Dso,
+                rela.as_mut_ptr(),
+                6 * size_of::<usize>(),
+                3,
+            )
+        };
         assert_eq!(unsafe { *at(base, 0x08) }, base as usize + 0x20 + 7);
         assert_eq!(unsafe { *at(base, 0x10) }, base as usize + 0x30);
     }
@@ -720,10 +755,20 @@ mod tests {
             info(1, REL_TPOFF),
             4,
         ];
-        unsafe { do_relocs(&mut dso as *mut Dso, rela.as_mut_ptr(), 9 * size_of::<usize>(), 3) };
+        unsafe {
+            do_relocs(
+                &mut dso as *mut Dso,
+                rela.as_mut_ptr(),
+                9 * size_of::<usize>(),
+                3,
+            )
+        };
         assert_eq!(unsafe { *at(base, 0x08) }, 1);
         assert_eq!(unsafe { *at(base, 0x10) }, 0x10 + 3);
-        assert_eq!(unsafe { *at(base, 0x18) }, 0x10usize.wrapping_sub(0x40).wrapping_add(4));
+        assert_eq!(
+            unsafe { *at(base, 0x18) },
+            0x10usize.wrapping_sub(0x40).wrapping_add(4)
+        );
     }
 
     #[test]
@@ -748,11 +793,21 @@ mod tests {
             );
         }
         let mut rela = [0x08usize, info(1, REL_TLSDESC), 6];
-        unsafe { do_relocs(&mut dso as *mut Dso, rela.as_mut_ptr(), 3 * size_of::<usize>(), 3) };
+        unsafe {
+            do_relocs(
+                &mut dso as *mut Dso,
+                rela.as_mut_ptr(),
+                3 * size_of::<usize>(),
+                3,
+            )
+        };
         let want_fn: usize =
             unsafe { transmute::<extern "C" fn() -> isize, usize>(tlsdesc_static) };
         assert_eq!(unsafe { *at(base, 0x08) }, want_fn);
-        assert_eq!(unsafe { *at(base, 0x10) }, 0x10usize.wrapping_sub(0x40).wrapping_add(6));
+        assert_eq!(
+            unsafe { *at(base, 0x10) },
+            0x10usize.wrapping_sub(0x40).wrapping_add(6)
+        );
     }
 
     extern "C" fn probe_resolver() -> usize {
@@ -765,10 +820,20 @@ mod tests {
         let base = mem.as_mut_ptr();
         let mut dso: Dso = unsafe { core::mem::zeroed() };
         dso.base = base;
-        let target: usize =
-            unsafe { transmute::<extern "C" fn() -> usize, usize>(probe_resolver) };
-        let mut rela = [0x18usize, info(0, REL_IRELATIVE), target.wrapping_sub(base as usize)];
-        unsafe { do_relocs(&mut dso as *mut Dso, rela.as_mut_ptr(), 3 * size_of::<usize>(), 3) };
+        let target: usize = unsafe { transmute::<extern "C" fn() -> usize, usize>(probe_resolver) };
+        let mut rela = [
+            0x18usize,
+            info(0, REL_IRELATIVE),
+            target.wrapping_sub(base as usize),
+        ];
+        unsafe {
+            do_relocs(
+                &mut dso as *mut Dso,
+                rela.as_mut_ptr(),
+                3 * size_of::<usize>(),
+                3,
+            )
+        };
         assert_eq!(unsafe { *at(base, 0x18) }, 0x1234_5678);
     }
 
@@ -776,7 +841,9 @@ mod tests {
     fn copy_moves_sized_def() {
         let mut mem = [0u8; 96];
         let base = mem.as_mut_ptr();
-        unsafe { *at(base, 0x40) = 0x1122_3344_5566_7788; }
+        unsafe {
+            *at(base, 0x40) = 0x1122_3344_5566_7788;
+        }
         // "obj": GLOBAL OBJECT @0x40, 8 bytes.
         let mut syms = [sym(0, 0, 0, 0, 0), sym(0, 0x11, 1, 0x40, 8)];
         let mut strs = *b"obj\0";
@@ -793,7 +860,14 @@ mod tests {
             );
         }
         let mut rela = [0x08usize, info(1, REL_COPY), 0];
-        unsafe { do_relocs(&mut dso as *mut Dso, rela.as_mut_ptr(), 3 * size_of::<usize>(), 3) };
+        unsafe {
+            do_relocs(
+                &mut dso as *mut Dso,
+                rela.as_mut_ptr(),
+                3 * size_of::<usize>(),
+                3,
+            )
+        };
         assert_eq!(unsafe { *at(base, 0x08) }, 0x1122_3344_5566_7788);
     }
 
@@ -816,7 +890,14 @@ mod tests {
             );
         }
         let mut rela = [0x08usize, info(1, REL_OFFSET32), 0x100];
-        unsafe { do_relocs(&mut dso as *mut Dso, rela.as_mut_ptr(), 3 * size_of::<usize>(), 3) };
+        unsafe {
+            do_relocs(
+                &mut dso as *mut Dso,
+                rela.as_mut_ptr(),
+                3 * size_of::<usize>(),
+                3,
+            )
+        };
         let addr = base as usize + 0x08;
         let want = (base as usize + 0x20 + 0x100 - addr) as u32;
         assert_eq!(unsafe { *(base.wrapping_add(0x08) as *const u32) }, want);
@@ -850,7 +931,14 @@ mod tests {
         let i1 = info(1, REL_PLT);
         let i2 = info(1, REL_GOT);
         let mut rela = [0x08usize, i1, 9, 0x10usize, i2, 10];
-        unsafe { do_relocs(&mut dso as *mut Dso, rela.as_mut_ptr(), 6 * size_of::<usize>(), 3) };
+        unsafe {
+            do_relocs(
+                &mut dso as *mut Dso,
+                rela.as_mut_ptr(),
+                6 * size_of::<usize>(),
+                3,
+            )
+        };
         assert_eq!(dso.lazy_cnt, 2);
         assert_eq!(lazy, [0x08, i1, 9, 0x10, i2, 10, 0, 0]);
         assert_eq!(unsafe { *at(base, 0x08) }, 0xaaaa);
