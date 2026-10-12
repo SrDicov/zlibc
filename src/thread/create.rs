@@ -944,7 +944,7 @@ mod tests {
         let mut rets: [*mut c_void; N] = [null_mut(); N];
         let mut mes: [usize; N] = [0; N];
         let mut outs: [u64; N] = [0; N];
-        let mut me: PthreadT = null_mut();
+        let me: PthreadT = unsafe { __pthread_self() };
         let mut eq_self = 0;
         let mut eq_null = 0;
         let mut eq_nulls = 0;
@@ -952,7 +952,6 @@ mod tests {
         let mut detach_again = -1;
         unsafe {
             ensure_main_tp();
-            me = __pthread_self();
             eq_self = __pthread_equal(me, me);
             eq_null = __pthread_equal(me, null_mut());
             eq_nulls = __pthread_equal(null_mut(), null_mut());

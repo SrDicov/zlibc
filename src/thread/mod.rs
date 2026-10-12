@@ -58,6 +58,7 @@ pub(crate) const SYS_SET_TID_ADDRESS: usize = 218; // TODO: generate from arch b
 #[cfg(target_arch = "x86_64")]
 pub(crate) const ARCH_SET_FS: usize = 0x1002;
 /// `ARCH_GET_FS` pair (test save/restore only; same `asm/prctl.h` family).
+#[cfg(test)]
 #[cfg(target_arch = "x86_64")]
 pub(crate) const ARCH_GET_FS: usize = 0x1003;
 
