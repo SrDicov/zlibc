@@ -162,7 +162,7 @@ mod tests {
             )
         };
         assert_eq!(buf, [0, 1, 0, 1, 2, 3, 4, 5]);
-        assert_eq!(ret as usize, buf.as_mut_ptr() as usize);
+        assert_eq!(ret as usize, buf.as_mut_ptr().wrapping_add(2) as usize);
     }
 
     /// Fills every byte, truncates `c` to `unsigned char`, returns `dest`.
