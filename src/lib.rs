@@ -4,6 +4,7 @@
 pub mod abi;
 pub mod mem;
 pub mod panic;
+pub mod start;
 pub mod symbols;
 pub mod syscall;
 
