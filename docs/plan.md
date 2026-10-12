@@ -254,13 +254,41 @@ probe lines). Needs only the existing `__syscall!` machinery.
   (parking-lot-style atomics), and tests address our fns explicitly.
 - Gate: counter + rendezvous green, no deadlocks.
 
-### C1 — create/clone/TLS (launches after B2 merges; needs TlsModule path)
-src/thread/: create.rs (mmap stack + mprotect guard + clone with all 10
-flags; child trampoline mirroring src/thread/x86_64/clone.s — C1 reads it
-first), tls.rs (TP setup per src/env/__init_tls.c + x86_64
-set_thread_area mechanism — C1 reads those first), unmapself (naked
-munmap+exit per arch asm), join/detach/self/equal minimum for the gate
-test. Depends on merged B2 (`crate::ldso::dso::TlsModule`) and B4 mem.
+### C1 — create/clone/TLS (worktree ../zlibc-c1, owns src/thread/)
+Depends on merged B2 (`crate::ldso::dso::TlsModule`) and B4 mem.
+Evidence (all verified in /home/dicov/musl):
+- `__clone` (src/thread/x86_64/clone.s): arg shuffle
+  (func→r9 saved, stack aligned 16, child arg popped), `clone` (56),
+  child calls func then `exit` (60); parent returns TID.
+- `__set_thread_area` (src/thread/x86_64/__set_thread_area.s):
+  `arch_prctl` (158) with `ARCH_SET_FS = 0x1002`.
+- `__unmapself` (src/thread/x86_64/__unmapself.s): `munmap` (11) of
+  its own stack, then `exit` (60) — naked, never returns.
+- `__init_tp` (src/env/__init_tls.c:17-33): self-assign, SET_FS,
+  `can_do_threads`, detach=JOINABLE, TID via `set_tid_address` (218),
+  locale, robust self-ref, sysinfo, circular list.
+- `__copy_tls` (same file): x86_64 has NO TLS_ABOVE_TP → DTV below TP,
+  `dtv[0]=cnt`, images copied per module.
+- Clone flags: all 10 (pthread_create.c:243-245). Stack/guard sizing:
+  C1 reads default_attr.c + pthread_create.c:260-300 first, no guessing.
+- The working thread struct: Parts 1+3 frozen (`PthreadHead`); Part 2
+  is explicitly non-ABI (pthread_impl.h) — C1 lays it out freely with
+  at least: tid, detach_state, stack base/size (munmap on detached
+  death), join result, start routine/arg. Justify every field in a
+  comment.
+- Main-thread TP: B1 deferred `__init_tls`; C1 owns an
+  `ensure_main_tp()` called at the top of `pthread_create`
+  (`shortcut:`, boot-time init moves to start.rs later).
+- Scope: create/join/detach/self/equal + TP setup + unmapself. Attrs:
+  accept defaults + detachstate + stacksize/guardsize, reject the rest
+  with ENOTSUP (same gate pattern as C2's check_type). Cancel points,
+  keys, atfork, barriers: explicitly OUT (later waves, `shortcut:`).
+- Tests: spawn N threads computing partial sums, join all, exact total;
+  detached thread observed to exit (join returns ESRCH... musl detaches:
+  test via tryjoin-after-sleep is timing-flaky — instead assert
+  detach returns 0 and the thread ran (atomic flag)). No timing
+  assumptions anywhere.
+- Proposes `pub mod thread;` line for coordinator.
 
 ### C3 — synccall (launches after C1; needs real threads + TIDs)
 src/thread/synccall.rs: `__synccall` per musl src/thread/synccall.c (C3
