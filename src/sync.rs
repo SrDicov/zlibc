@@ -705,9 +705,9 @@ mod tests {
             ENTERED.store(1, Ordering::Relaxed);
             while FLAG.load(Ordering::Relaxed) == 0 {
                 assert_eq!(crate::sync::pthread_cond_wait(c, m), 0);
-              }
+            }
             assert_eq!(crate::sync::pthread_mutex_unlock(m), 0);
-          });
+        });
         unsafe {
             while ENTERED.load(Ordering::Relaxed) == 0 {
                 core::hint::spin_loop();
@@ -743,10 +743,10 @@ mod tests {
                 let _ = ENTERED.fetch_add(1, Ordering::Relaxed);
                 while FLAG.load(Ordering::Relaxed) == 0 {
                     assert_eq!(crate::sync::pthread_cond_wait(c, m), 0);
-                  }
+                }
                 let _ = WOKE.fetch_add(1, Ordering::Relaxed);
                 assert_eq!(crate::sync::pthread_mutex_unlock(m), 0);
-              }));
+            }));
         }
         unsafe {
             while ENTERED.load(Ordering::Relaxed) != NWAITERS {
