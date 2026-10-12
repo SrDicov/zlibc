@@ -339,7 +339,7 @@ pub unsafe extern "C" fn __pthread_create(
             tid_cell,
             tid_cell,
             td as usize,
-            child_entry as usize,
+            child_entry as *const () as usize,
             td as usize,
         );
         if r < 0 {

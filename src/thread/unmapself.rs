@@ -18,6 +18,12 @@
 //! from `rdi`/`rsi`, so Rust never names them.)
 #[cfg(target_arch = "x86_64")]
 #[unsafe(naked)]
+/// Unmap the calling thread's stack mapping, then exit(0).
+///
+/// # Safety
+///
+/// Same contract as the module docs: exact live-stack coverage, never
+/// returns, caller unreachable-after-call.
 pub unsafe extern "C" fn __unmapself(_base: *mut u8, _size: usize) {
     core::arch::naked_asm!(
         "mov eax, 11",
