@@ -189,65 +189,47 @@ extern "C" {
 }
 
 /// C-style dispatcher: `__syscall!(SYS_WRITE, fd, buf, len)`.
+///
+/// Each arm binds its arguments OUTSIDE the `unsafe` block (a bare
+/// `unsafe { syscall_ret(syscallN($n, ...)) }` would expand caller
+/// metavariables inside `unsafe`, tripping
+/// `clippy::macro_metavars_in_unsafe`). Callers use the macro in safe
+/// position; the raw trap stays inside.
 #[macro_export]
 macro_rules! __syscall {
-    ($n:expr) => {
-        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall0($n)) }
-    };
-    ($n:expr, $a1:expr) => {
-        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall1($n, $a1 as usize)) }
-    };
-    ($n:expr, $a1:expr, $a2:expr) => {
+    ($n:expr) => {{
+        let n = $n;
+        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall0(n)) }
+    }};
+    ($n:expr, $a1:expr) => {{
+        let (n, a1) = ($n, $a1 as usize);
+        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall1(n, a1)) }
+    }};
+    ($n:expr, $a1:expr, $a2:expr) => {{
+        let (n, a1, a2) = ($n, $a1 as usize, $a2 as usize);
+        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall2(n, a1, a2)) }
+    }};
+    ($n:expr, $a1:expr, $a2:expr, $a3:expr) => {{
+        let (n, a1, a2, a3) = ($n, $a1 as usize, $a2 as usize, $a3 as usize);
+        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall3(n, a1, a2, a3)) }
+    }};
+    ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr) => {{
+        let (n, a1, a2, a3, a4) = ($n, $a1 as usize, $a2 as usize, $a3 as usize, $a4 as usize);
+        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall4(n, a1, a2, a3, a4)) }
+    }};
+    ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr) => {{
+        let (n, a1, a2, a3, a4, a5) =
+            ($n, $a1 as usize, $a2 as usize, $a3 as usize, $a4 as usize, $a5 as usize);
+        unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall5(n, a1, a2, a3, a4, a5)) }
+    }};
+    ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr, $a6:expr) => {{
+        let (n, a1, a2, a3, a4, a5, a6) = (
+            $n, $a1 as usize, $a2 as usize, $a3 as usize, $a4 as usize, $a5 as usize, $a6 as usize,
+        );
         unsafe {
-            $crate::syscall::syscall_ret($crate::syscall::syscall2($n, $a1 as usize, $a2 as usize))
+            $crate::syscall::syscall_ret($crate::syscall::syscall6(n, a1, a2, a3, a4, a5, a6))
         }
-    };
-    ($n:expr, $a1:expr, $a2:expr, $a3:expr) => {
-        unsafe {
-            $crate::syscall::syscall_ret($crate::syscall::syscall3(
-                $n,
-                $a1 as usize,
-                $a2 as usize,
-                $a3 as usize,
-            ))
-        }
-    };
-    ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr) => {
-        unsafe {
-            $crate::syscall::syscall_ret($crate::syscall::syscall4(
-                $n,
-                $a1 as usize,
-                $a2 as usize,
-                $a3 as usize,
-                $a4 as usize,
-            ))
-        }
-    };
-    ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr) => {
-        unsafe {
-            $crate::syscall::syscall_ret($crate::syscall::syscall5(
-                $n,
-                $a1 as usize,
-                $a2 as usize,
-                $a3 as usize,
-                $a4 as usize,
-                $a5 as usize,
-            ))
-        }
-    };
-    ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr, $a6:expr) => {
-        unsafe {
-            $crate::syscall::syscall_ret($crate::syscall::syscall6(
-                $n,
-                $a1 as usize,
-                $a2 as usize,
-                $a3 as usize,
-                $a4 as usize,
-                $a5 as usize,
-                $a6 as usize,
-            ))
-        }
-    };
+    }};
 }
 
 #[cfg(test)]
