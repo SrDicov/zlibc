@@ -190,7 +190,8 @@ extern "C" {
 
 /// C-style dispatcher: `__syscall!(SYS_WRITE, fd, buf, len)`.
 #[macro_export]
-macro_rules! __syscall {    ($n:expr) => {
+macro_rules! __syscall {
+    ($n:expr) => {
         unsafe { $crate::syscall::syscall_ret($crate::syscall::syscall0($n)) }
     };
     ($n:expr, $a1:expr) => {
