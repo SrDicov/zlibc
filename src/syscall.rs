@@ -262,17 +262,22 @@ mod tests {
         assert!(pid > 0, "getpid returned {pid}");
     }
 
-    /// Proves `___errno_location` exists as a WEAK alias: taking its
-    /// address must link fine and yield null while `__errno_location`
-    /// stays undefined (Wave 2/3 defines it — update this test then).
-    /// A missing alias would fail here at link time instead.
+    /// Proves `___errno_location` exists as an alias of
+    /// `__errno_location`: both addresses must coincide. (On a glibc
+    /// host they resolve to glibc's definition; on freestanding zlibc
+    /// they will resolve to ours. A missing alias would fail here at
+    /// link time instead.) The alias stays WEAK (see musl
+    /// src/errno/__errno_location.c:9), so a future strong definition
+    /// overrides it without duplicate-symbol errors.
     #[cfg(target_arch = "x86_64")]
     #[test]
-    fn weak_alias_is_weak_undefined() {
+    fn weak_alias_targets_errno_location() {
         extern "C" {
             static ___errno_location: u8;
+            fn __errno_location() -> *mut core::ffi::c_int;
         }
-        let addr = core::ptr::addr_of!(___errno_location) as usize;
-        assert_eq!(addr, 0, "weak alias unexpectedly resolved");
+        let alias = core::ptr::addr_of!(___errno_location) as *const u8 as usize;
+        let target = __errno_location as usize;
+        assert_eq!(alias, target, "weak alias does not track __errno_location");
     }
 }
