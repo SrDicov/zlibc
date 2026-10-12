@@ -12,7 +12,7 @@ use core::sync::atomic::Ordering;
 use crate::abi::PthreadT;
 use crate::futex::{futex_wait_private, futex_wake_private};
 use crate::ldso::{MAP_ANONYMOUS, MAP_PRIVATE, PAGE_SIZE, PROT_NONE, PROT_READ, PROT_WRITE};
-use crate::syscall::syscall1;
+use crate::syscall::{syscall1, syscall3, syscall6, syscall_ret};
 
 use super::tls::{copy_tls, ensure_main_tp, get_tp, set_tp};
 use super::unmapself::__unmapself;
@@ -277,15 +277,17 @@ pub unsafe extern "C" fn __pthread_create(
         };
         // -1 fd for MAP_ANONYMOUS, spelled as usize::MAX: `-1 as usize`
         // parses as `-(1 as usize)` and does not compile.
-        let map = crate::__syscall!(
+        // Direct calls (not the macro): the macro wraps itself in
+        // `unsafe`, which would be redundant inside this block.
+        let map = syscall_ret(syscall6(
             SYS_MMAP,
             0,
             size,
-            PROT_READ | PROT_WRITE,
-            MAP_PRIVATE | MAP_ANONYMOUS,
+            (PROT_READ | PROT_WRITE) as usize,
+            (MAP_PRIVATE | MAP_ANONYMOUS) as usize,
             usize::MAX,
-            0
-        );
+            0,
+        ));
         if map == -1 {
             return EAGAIN;
         }
@@ -294,9 +296,14 @@ pub unsafe extern "C" fn __pthread_create(
             // mapping RW and closing the guard is the same end state. Any
             // failure unmaps and reports EAGAIN (`mprotect` is
             // unconditional on x86_64 Linux).
-            let r = crate::__syscall!(SYS_MPROTECT, map, guard, PROT_NONE);
+            let r = syscall_ret(syscall3(
+                SYS_MPROTECT,
+                map as usize,
+                guard,
+                PROT_NONE as usize,
+            ));
             if r == -1 {
-                let _ = crate::__syscall!(SYS_MUNMAP, map, size);
+                let _ = syscall_ret(syscall3(SYS_MUNMAP, map as usize, size));
                 return EAGAIN;
             }
         }
@@ -336,7 +343,7 @@ pub unsafe extern "C" fn __pthread_create(
             td as usize,
         );
         if r < 0 {
-            let _ = crate::__syscall!(SYS_MUNMAP, base, size);
+            let _ = syscall_ret(syscall3(SYS_MUNMAP, base as usize, size));
             return EAGAIN;
         }
         res.write(td as PthreadT);
