@@ -944,17 +944,12 @@ mod tests {
         let mut rets: [*mut c_void; N] = [null_mut(); N];
         let mut mes: [usize; N] = [0; N];
         let mut outs: [u64; N] = [0; N];
+        ensure_main_tp();
         let me: PthreadT = unsafe { __pthread_self() };
-        let mut eq_self = 0;
-        let mut eq_null = 0;
-        let mut eq_nulls = 0;
-        let mut detach_rc = -1;
-        let mut detach_again = -1;
+        let eq_self = unsafe { __pthread_equal(me, me) };
+        let eq_null = unsafe { __pthread_equal(me, null_mut()) };
+        let eq_nulls = unsafe { __pthread_equal(null_mut(), null_mut()) };
         unsafe {
-            ensure_main_tp();
-            eq_self = __pthread_equal(me, me);
-            eq_null = __pthread_equal(me, null_mut());
-            eq_nulls = __pthread_equal(null_mut(), null_mut());
             let mut k = 0;
             while k < N {
                 let s = core::ptr::addr_of_mut!(SLOTS).cast::<SumSlot>().add(k);
@@ -976,20 +971,23 @@ mod tests {
                 k += 1;
             }
             FLAG.store(0, Ordering::SeqCst);
-            let mut attr = AttrT::default();
-            let mut dt: PthreadT = null_mut();
-            // Joinable at birth: detach once (0), detach again (EINVAL),
-            // then the detached death runs flag_routine via __unmapself.
+        }
+        let mut attr = AttrT::default();
+        let mut dt: PthreadT = null_mut();
+        // Joinable at birth: detach once (0), detach again (EINVAL),
+        // then the detached death runs flag_routine via __unmapself.
+        let (detach_rc, detach_again) = unsafe {
             if __pthread_attr_init(&mut attr) == 0
                 && __pthread_create(&mut dt, &attr, Some(flag_routine), null_mut()) == 0
             {
-                detach_rc = __pthread_detach(dt);
-                detach_again = __pthread_detach(dt);
+                (__pthread_detach(dt), __pthread_detach(dt))
+            } else {
+                (-1, -1)
             }
-            if detach_rc == 0 {
-                while FLAG.load(Ordering::SeqCst) == 0 {
-                    core::hint::spin_loop();
-                }
+        };
+        if detach_rc == 0 {
+            while FLAG.load(Ordering::SeqCst) == 0 {
+                core::hint::spin_loop();
             }
         }
         restore_fs(host_fs);

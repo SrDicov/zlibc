@@ -143,6 +143,14 @@ pub(crate) fn ensure_main_tp() {
     if DONE.swap(true, Ordering::SeqCst) {
         return;
     }
+    // shortcut(hosted guest): a freestanding boot always sees FS == 0
+    // (the kernel clears it on exec). A nonzero FS means a foreign
+    // runtime already owns this thread (e.g. glibc under `cargo test`);
+    // taking it over would kill the host process on its next TLS touch,
+    // so leave it. Clone()d threads still get real TPs via CLONE_SETTLS.
+    if get_tp() != 0 {
+        return;
+    }
     unsafe {
         let td = core::ptr::addr_of_mut!(MAIN_THREAD);
         (*td).head.this = td.cast::<PthreadHead>();
