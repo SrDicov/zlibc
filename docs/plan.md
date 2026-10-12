@@ -161,9 +161,70 @@ written from B2's merged `Dso`. Not launched yet.
 ### Wave 2 gate
 `cargo test` green + a follow-up wave boots a binary (full hello-world
 runs when B3 + Wave 3 threads exist; this wave delivers the pieces).
-- **Wave 3** — pthreads: C1 create/clone/TLS/`__unmapself`; C2 futex +
-  sync (futex interface fixed first so C1/C2 parallelize); C3 synccall.
-  Gate: N-thread + mutex/condvar test, no deadlocks.
+## Wave 3 contract — pthreads + futex (x86_64)
+
+Wave goal line: esta ola avanza **compat ABI + POSIX** (hilos y
+sincronización son contrato POSIX observable), sin comprometer los demás.
+
+Evidence (all verified in /home/dicov/musl):
+- Mutex overlay: `_m_type=__i[0]`, `_m_lock=__vi[1]`, `_m_waiters=__vi[2]`,
+  `_m_prev=__p[3]`, `_m_next=__p[4]`, `_m_count=__i[5]`
+  (src/internal/pthread_impl.h:86-91); opaque size 40B
+  (include/alltypes.h.in:87: int[10]/void*[5] on 64-bit).
+- Cond overlay: `_c_shared=__p[0]`, `_c_seq=__vi[2]`, `_c_waiters=__vi[3]`,
+  `_c_clock=__i[4]`, `_c_lock=__vi[8]`, `_c_head=__p[1]`, `_c_tail=__p[5]`
+  (pthread_impl.h:92-97); opaque size 48B (alltypes.h.in:89).
+- Lock encoding (src/thread/pthread_mutex_trylock.c:14-35): owner TID in
+  low 30 bits (`& 0x3fffffff`), `MAYBE_WAITERS = 0x80000000`, robust bit
+  `0x40000000`.
+- `__wait` (src/thread/__wait.c): 100 spins → waiters++ → FUTEX_WAIT loop
+  → waiters--, with ENOSYS fallback to non-PRIVATE.
+- Futex ops (src/internal/futex.h): WAIT=0, WAKE=1, PRIVATE=128,
+  CLOCK_REALTIME=256.
+- Syscalls (arch/x86_64/bits/syscall.h.in): futex=202, clone=56,
+  tkill=200, tgkill=234, set_tid_address=218, nanosleep=35.
+- Clone flags (src/thread/pthread_create.c:243-245): VM|FS|FILES|SIGHAND|
+  THREAD|SYSVSEM|SETTLS|PARENT_SETTID|CHILD_CLEARTID|DETACHED (all 10).
+- SIGSYNCCALL=34 (pthread_impl.h:131); `__synccall` decl
+  src/internal/libc.h:55.
+
+### C2 — futex + mutex + condvar (worktree ../zlibc-c2, LAUNCHED EARLY)
+Independent of B2/B3: touches only src/futex.rs + src/sync.rs (+ additive
+probe lines). Needs only the existing `__syscall!` machinery.
+- src/futex.rs: op consts, SYS_FUTEX=202, futex_wait/wake (private +
+  shared), `__wait` equivalent (spins, waiters counting, ENOSYS fallback).
+- src/sync.rs: `MutexT` = `[u64; 5]` + index accessors mirroring the
+  `_m_*` macros; lock/unlock/trylock for NORMAL/RECURSIVE/ERRORCHECK;
+  robust/PI/PP explicitly deferred with `shortcut:`.
+  `CondT` = `[u64; 6]` + `_c_*` accessors; wait/signal/broadcast per musl
+  src/thread/cnd_wait.c, cnd_signal.c, cnd_broadcast.c (C2 reads those
+  files first); timedwait deferred with `shortcut:` (needs clock).
+- Probe (additive): SIZE_MUTEX/SIZE_COND + OFF_M_*/OFF_C_* using musl's
+  own index macros, e.g. `(size_t)&((pthread_mutex_t*)0)->_m_lock`
+  (needs pthread_impl.h — already included in probe.c).
+- Tests: threaded counter via std::thread + condvar rendezvous, calling
+  `crate::` paths. NOTE (verified reasoning): our `#[no_mangle]`
+  pthread_mutex_*/cond_* interpose host glibc symbols in the test binary,
+  which is benign — std never calls pthread_mutex/cond internally
+  (parking-lot-style atomics), and tests address our fns explicitly.
+- Gate: counter + rendezvous green, no deadlocks.
+
+### C1 — create/clone/TLS (launches after B2 merges; needs TlsModule path)
+src/thread/: create.rs (mmap stack + mprotect guard + clone with all 10
+flags; child trampoline mirroring src/thread/x86_64/clone.s — C1 reads it
+first), tls.rs (TP setup per src/env/__init_tls.c + x86_64
+set_thread_area mechanism — C1 reads those first), unmapself (naked
+munmap+exit per arch asm), join/detach/self/equal minimum for the gate
+test. Depends on merged B2 (`crate::ldso::dso::TlsModule`) and B4 mem.
+
+### C3 — synccall (launches after C1; needs real threads + TIDs)
+src/thread/synccall.rs: `__synccall` per musl src/thread/synccall.c (C3
+verifies the filename first), SIGSYNCCALL handler, caller/target/exit
+sems over C2 futex, atomics-only in handler (AS-safe). Depends on C1+C2.
+
+### Wave 3 gate
+N-thread counter + mutex/condvar rendezvous test green, then merge
+`testing → main`, tag `v0.2`.
 - **Wave 4** — stdio, mallocng, libm, locale/network/misc, validation.
   Gate: hello + pthreads + malloc/stdio running, CI green on `main`.
 
