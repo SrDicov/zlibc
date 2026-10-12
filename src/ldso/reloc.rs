@@ -193,7 +193,9 @@ unsafe fn fatal(dso: *const c_char, sym: *const c_char, detail: &[u8]) -> ! {
             write_all(2, sym as *const u8, c_strlen(sym));
         }
         write_all(2, FATAL_NL.as_ptr(), FATAL_NL.len());
-        crate::__syscall!(SYS_EXIT_GROUP, 127);
+        // Direct calls, not the macro: the macro wraps itself in `unsafe`,
+        // which would be redundant inside this block (unused_unsafe).
+        crate::syscall::syscall_ret(crate::syscall::syscall1(SYS_EXIT_GROUP, 127));
         core::hint::unreachable_unchecked()
     }
 }
@@ -411,8 +413,8 @@ pub unsafe fn do_relocs(dso: *mut Dso, rel: *mut usize, rel_size: usize, stride:
             };
 
             let sym_idx = r_sym(r_info);
-            let mut def_dso: *mut Dso = core::ptr::null_mut();
-            let mut def_sym: *mut Elf64Sym = core::ptr::null_mut();
+            let def_dso: *mut Dso;
+            let def_sym: *mut Elf64Sym;
             let mut ref_sym: *mut Elf64Sym = core::ptr::null_mut();
             let mut name: *const c_char = core::ptr::null();
             if sym_idx != 0 {
@@ -446,6 +448,7 @@ pub unsafe fn do_relocs(dso: *mut Dso, rel: *mut usize, rel_size: usize, stride:
                 }
             } else {
                 def_dso = dso;
+                def_sym = core::ptr::null_mut();
             }
 
             let sym_val = if def_sym.is_null() {
@@ -545,7 +548,7 @@ pub unsafe fn do_relocs(dso: *mut Dso, rel: *mut usize, rel_size: usize, stride:
                         // no allocator until Wave 4.
                         fatal((*dso).name, name, b"dynamic TLSDESC needs allocator");
                     }
-                    let desc: usize = transmute::<extern "C" fn() -> isize, usize>(tlsdesc_static);
+                    let desc: usize = tlsdesc_static as usize;
                     *addr.add(0) = desc;
                     *addr.add(1) = tls_val.wrapping_sub((*def_dso).tls.offset).wrapping_add(a);
                 }
@@ -801,8 +804,7 @@ mod tests {
                 3,
             )
         };
-        let want_fn: usize =
-            unsafe { transmute::<extern "C" fn() -> isize, usize>(tlsdesc_static) };
+        let want_fn: usize = tlsdesc_static as usize;
         assert_eq!(unsafe { *at(base, 0x08) }, want_fn);
         assert_eq!(
             unsafe { *at(base, 0x10) },
@@ -820,7 +822,7 @@ mod tests {
         let base = mem.as_mut_ptr();
         let mut dso: Dso = unsafe { core::mem::zeroed() };
         dso.base = base;
-        let target: usize = unsafe { transmute::<extern "C" fn() -> usize, usize>(probe_resolver) };
+        let target: usize = probe_resolver as usize;
         let mut rela = [
             0x18usize,
             info(0, REL_IRELATIVE),
