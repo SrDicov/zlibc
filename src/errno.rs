@@ -18,7 +18,14 @@
 use core::cell::UnsafeCell;
 use core::ffi::c_int;
 
-static ERRNO: UnsafeCell<c_int> = UnsafeCell::new(0);
+struct ErrnoCell(UnsafeCell<c_int>);
+
+/// `Sync` for the cell. Sound only while single-threaded (see module
+/// docs); Wave 3 deletes this with the TLS upgrade.
+// SAFETY: no thread exists yet that could race on the cell.
+unsafe impl Sync for ErrnoCell {}
+
+static ERRNO: ErrnoCell = ErrnoCell(UnsafeCell::new(0));
 
 /// Pointer to the `errno` cell.
 ///
@@ -28,5 +35,5 @@ static ERRNO: UnsafeCell<c_int> = UnsafeCell::new(0);
 /// thread-local storage, all threads share this one cell.
 #[no_mangle]
 pub unsafe extern "C" fn __errno_location() -> *mut c_int {
-    ERRNO.get()
+    ERRNO.0.get()
 }
