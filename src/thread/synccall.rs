@@ -223,7 +223,11 @@ unsafe fn cut_locked(td: *mut Thread) {
         (*prev.cast::<Thread>()).head.next = next;
         (*next.cast::<Thread>()).head.prev = prev;
         if td == core::ptr::addr_of_mut!(REG_HEAD).read() {
-            let rest = if next == td.cast() { null_mut() } else { next.cast() };
+            let rest = if next == td.cast() {
+                null_mut()
+            } else {
+                next.cast()
+            };
             core::ptr::addr_of_mut!(REG_HEAD).write(rest);
         }
     }
@@ -543,7 +547,11 @@ mod tests {
                 }
                 ok = RUNS.load(Ordering::SeqCst) == N as u32 + 1;
             }
-            assert!(ok, "no clean wave in {TRIES} tries (runs={})", RUNS.load(Ordering::SeqCst));
+            assert!(
+                ok,
+                "no clean wave in {TRIES} tries (runs={})",
+                RUNS.load(Ordering::SeqCst)
+            );
         }
     }
 }

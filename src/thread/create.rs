@@ -185,7 +185,8 @@ unsafe fn thread_exit(td: *mut Thread, res: *mut c_void) -> ! {
                 syscall1(SYS_EXIT, 0);
             }
         } else {
-            super::synccall::unregister_thread(td); // C3: unlink before __unmapself frees us.
+            // C3: unlink before __unmapself frees us.
+            super::synccall::unregister_thread(td);
             // Detached (created so, or a concurrent detach won): unmap our
             // own stack and die. `map_base` is always set here — user
             // stacks are rejected at create — but exit rather than fault.
