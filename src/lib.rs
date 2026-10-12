@@ -2,6 +2,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod abi;
+pub mod symbols;
 pub mod syscall;
 
 // OUT_DIR/abi_probed.rs is emitted by build.rs with sizes/offsets
@@ -57,6 +58,8 @@ const _: () = assert!(PROBE_OFF_PTHREAD_DTV == offset_of!(abi::PthreadHead, dtv)
 const _: () = assert!(PROBE_OFF_PTHREAD_SYSINFO == offset_of!(abi::PthreadHead, sysinfo));
 #[cfg(target_arch = "x86_64")]
 const _: () = assert!(PROBE_OFF_PTHREAD_CANARY == offset_of!(abi::PthreadHead, canary));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_PTHREAD_T == size_of::<abi::PthreadT>());
 
 // no_std has no default panic handler; tests gate this out (libtest
 // provides its own) via cfg(not(test)).

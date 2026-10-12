@@ -1,10 +1,9 @@
-//! Raw syscall dispatch for x86_64 (PoC, 0–3 args).
+//! Raw syscall dispatch for x86_64 (0–6 args).
 //!
-//! Mirrors musl's `__syscall0..3` (arch/x86_64/syscall_arch.h):
-//! nr in `rax`, args in `rdi/rsi/rdx`, `rcx`/`r11` clobbered.
-//! No `nomem` (syscalls read/write memory) and no `preserves_flags`
-//! (`syscall` clobbers rflags via `r11`). Extend to 0–7 following
-//! the same pattern.
+//! Mirrors musl's `__syscall0..6` (arch/x86_64/syscall_arch.h):
+//! nr in `rax`, args in `rdi`/`rsi`/`rdx`/`r10`/`r8`/`r9`,
+//! `rcx`/`r11` clobbered. No `nomem` (syscalls read/write memory)
+//! and no `preserves_flags` (`syscall` clobbers rflags via `r11`).
 
 use core::ffi::c_int;
 
@@ -93,6 +92,77 @@ pub unsafe fn syscall3(n: usize, a1: usize, a2: usize, a3: usize) -> isize {
     ret
 }
 
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+/// Raw 4-arg syscall.
+///
+/// # Safety
+///
+/// Like [`syscall1`]; `a1`/`a2`/`a3`/`a4` go in `rdi`/`rsi`/`rdx`/`r10`.
+pub unsafe fn syscall4(n: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> isize {
+    let ret: isize;
+    unsafe {
+        core::arch::asm!(
+            "syscall",
+            inlateout("rax") n as isize => ret,
+            in("rdi") a1, in("rsi") a2, in("rdx") a3, in("r10") a4,
+            out("rcx") _, out("r11") _,
+        );
+    }
+    ret
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+/// Raw 5-arg syscall.
+///
+/// # Safety
+///
+/// Like [`syscall1`]; `a1`/`a2`/`a3`/`a4`/`a5` go in
+/// `rdi`/`rsi`/`rdx`/`r10`/`r8`.
+pub unsafe fn syscall5(n: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize) -> isize {
+    let ret: isize;
+    unsafe {
+        core::arch::asm!(
+            "syscall",
+            inlateout("rax") n as isize => ret,
+            in("rdi") a1, in("rsi") a2, in("rdx") a3, in("r10") a4, in("r8") a5,
+            out("rcx") _, out("r11") _,
+        );
+    }
+    ret
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+/// Raw 6-arg syscall.
+///
+/// # Safety
+///
+/// Like [`syscall1`]; `a1`/`a2`/`a3`/`a4`/`a5`/`a6` go in
+/// `rdi`/`rsi`/`rdx`/`r10`/`r8`/`r9`.
+pub unsafe fn syscall6(
+    n: usize,
+    a1: usize,
+    a2: usize,
+    a3: usize,
+    a4: usize,
+    a5: usize,
+    a6: usize,
+) -> isize {
+    let ret: isize;
+    unsafe {
+        core::arch::asm!(
+            "syscall",
+            inlateout("rax") n as isize => ret,
+            in("rdi") a1, in("rsi") a2, in("rdx") a3,
+            in("r10") a4, in("r8") a5, in("r9") a6,
+            out("rcx") _, out("r11") _,
+        );
+    }
+    ret
+}
+
 /// musl `__syscall_ret`: kernel returns -4095..-1 on error.
 /// Negate to get the errno, store via `__errno_location`, return -1.
 ///
@@ -142,4 +212,72 @@ macro_rules! __syscall {
             ))
         }
     };
+    ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr) => {
+        unsafe {
+            $crate::syscall::syscall_ret($crate::syscall::syscall4(
+                $n,
+                $a1 as usize,
+                $a2 as usize,
+                $a3 as usize,
+                $a4 as usize,
+            ))
+        }
+    };
+    ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr) => {
+        unsafe {
+            $crate::syscall::syscall_ret($crate::syscall::syscall5(
+                $n,
+                $a1 as usize,
+                $a2 as usize,
+                $a3 as usize,
+                $a4 as usize,
+                $a5 as usize,
+            ))
+        }
+    };
+    ($n:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr, $a6:expr) => {
+        unsafe {
+            $crate::syscall::syscall_ret($crate::syscall::syscall6(
+                $n,
+                $a1 as usize,
+                $a2 as usize,
+                $a3 as usize,
+                $a4 as usize,
+                $a5 as usize,
+                $a6 as usize,
+            ))
+        }
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    /// Proves raw dispatch works on real Linux: SYS_getpid (39, x86_64)
+    /// takes no args and must return a positive pid. Also forces the
+    /// linker to retain the syscall path in the test binary.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn raw_syscall_getpid_works() {
+        let pid = unsafe { crate::syscall::syscall0(39) };
+        assert!(pid > 0, "getpid returned {pid}");
+    }
+
+    /// Proves `___errno_location` exists as an alias of
+    /// `__errno_location`: both addresses must coincide. (On a glibc
+    /// host they resolve to glibc's definition; on freestanding zlibc
+    /// they will resolve to ours. A missing alias would fail here at
+    /// link time instead.) The alias stays WEAK (see musl
+    /// src/errno/__errno_location.c:9), so a future strong definition
+    /// overrides it without duplicate-symbol errors.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn weak_alias_targets_errno_location() {
+        extern "C" {
+            static ___errno_location: u8;
+            fn __errno_location() -> *mut core::ffi::c_int;
+        }
+        let alias = core::ptr::addr_of!(___errno_location) as usize;
+        let target = __errno_location as *const () as usize;
+        assert_eq!(alias, target, "weak alias does not track __errno_location");
+    }
 }
