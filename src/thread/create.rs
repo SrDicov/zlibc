@@ -177,6 +177,7 @@ unsafe fn thread_exit(td: *mut Thread, res: *mut c_void) -> ! {
             Ok(s) | Err(s) => s,
         };
         if st == DT_JOINABLE {
+            super::synccall::unregister_thread(td); // C3: unlink before DT_EXITED wakes join.
             (*td).detach_state.store(DT_EXITED, Ordering::SeqCst);
             let _ = futex_wake_private(detach_word(td), 1);
             syscall1(SYS_EXIT, 0);
@@ -184,6 +185,7 @@ unsafe fn thread_exit(td: *mut Thread, res: *mut c_void) -> ! {
                 syscall1(SYS_EXIT, 0);
             }
         } else {
+            super::synccall::unregister_thread(td); // C3: unlink before __unmapself frees us.
             // Detached (created so, or a concurrent detach won): unmap our
             // own stack and die. `map_base` is always set here — user
             // stacks are rejected at create — but exit rather than fault.
@@ -349,6 +351,7 @@ pub unsafe extern "C" fn __pthread_create(
             let _ = syscall_ret(syscall2(SYS_MUNMAP, base as usize, size));
             return EAGAIN;
         }
+        super::synccall::register_thread(td); // C3: link into the synccall registry.
         res.write(td as PthreadT);
         0
     }

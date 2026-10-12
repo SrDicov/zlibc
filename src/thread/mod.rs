@@ -32,6 +32,7 @@
 //! user-provided stacks, explicit scheduling.
 
 pub mod create;
+pub mod synccall;
 pub mod tls;
 pub mod unmapself;
 
