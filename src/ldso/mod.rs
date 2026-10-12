@@ -10,6 +10,7 @@
 //! `arch/x86_64/bits/`.
 
 pub mod dso;
+pub mod reloc;
 
 use core::ffi::c_int;
 
