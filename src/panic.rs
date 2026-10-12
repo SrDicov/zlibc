@@ -47,7 +47,10 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     {
         const PREFIX: &[u8] = b"zlibc panic: ";
 
-        let mut msg = PanicMsg { buf: [0; 256], len: 0 };
+        let mut msg = PanicMsg {
+            buf: [0; 256],
+            len: 0,
+        };
         let _ = core::fmt::write(&mut msg, format_args!("{}\n", info.message()));
 
         // Raw syscalls only (see module docs for why errno is untouched).
@@ -80,7 +83,10 @@ mod tests {
     /// A short message (the common panic case) lands whole in the buffer.
     #[test]
     fn short_message_fits_whole() {
-        let mut msg = PanicMsg { buf: [0; 256], len: 0 };
+        let mut msg = PanicMsg {
+            buf: [0; 256],
+            len: 0,
+        };
         let _ = msg.write_str("boom\n");
         assert_eq!(&msg.buf[..msg.len], b"boom\n");
     }
@@ -88,7 +94,10 @@ mod tests {
     /// A huge message fills the buffer and drops the rest, no panic.
     #[test]
     fn long_message_truncates_without_panicking() {
-        let mut msg = PanicMsg { buf: [0; 256], len: 0 };
+        let mut msg = PanicMsg {
+            buf: [0; 256],
+            len: 0,
+        };
         for _ in 0..64 {
             let _ = msg.write_str("0123456789abcdef");
         }
