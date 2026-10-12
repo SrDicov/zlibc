@@ -154,9 +154,43 @@ signatures, correct byte loops + `shortcut:` (word-at-a-time when
 measured, per principle 5). Tests call `crate::mem::*` directly
 (never link against host symbols).
 
-### B3 — src/ldso/reloc.rs (launches after B2 lands)
-GOT/PLT RELATIVE relocs, lazy binding stubs, TLSDESC basics. Contract
-written from B2's merged `Dso`. Not launched yet.
+### B3 — src/ldso/reloc.rs (launches after B2 merges; needs `Dso`)
+New file, exclusively B3's. Uses `crate::ldso::dso::{Dso, find_sym}`
+(B2's merged paths — binding) + `crate::mem::memcpy` (B4, merged).
+Mirrors musl `do_relocs` (ldso/dynlink.c:383-530 — B3 reads it fully
+first, plus `reloc_all` for the IRELATIVE path):
+- `do_relocs(dso, rel, rel_size, stride)` with stride 2 (REL) / 3 (RELA,
+  incl. the lazy table at dynlink.c:589). Addend rules: RELA→rel[2];
+  REL GOT/PLT/COPY→0; else re-read `*reloc_addr` (ldso addend
+  save/reuse is ldso-self-only — skip with `shortcut:` until self-host).
+- Cases: NONE(skip), OFFSET(fallthrough), SYMBOLIC/GOT/PLT
+  (`*addr = sym_val+addend`), USYMBOLIC (memcpy), RELATIVE
+  (`base+addend`), SYM_OR_REL, COPY (memcpy sym_val, st_size), OFFSET32
+  (u32), DTPMOD/DTPOFF/TPOFF (x86_64: NO TLS_ABOVE_TP →
+  `tls_val - tls.offset + addend`; TPOFF_NEG per arch macro),
+  IRELATIVE (call resolver: `((addr)(base+addend))()`), TLSDESC.
+- Lazy: unresolved PLT/GOT → saved triples into `dso->lazy`
+  (dynlink.c:439-446) when `dso->lazy` set; applied later by reloc_all.
+- Lookup: STB_LOCAL → local def; else B2's `find_sym`, then `get_lfs64`
+  fallback; missing non-weak-undef → fatal to fd 2 + exit_group
+  (`shortcut:` — no longjmp/setjmp until a later wave; mirrors musl's
+  error+longjmp outcome: process dies with a diagnostic).
+- TLSDESC needing dynamic DTV (`tls_id > static_tls_cnt`) → same fatal
+  path (`shortcut:` — musl mallocs a `td_index`; we have no allocator
+  until Wave 4 mallocng). Static-TLS TLSDESC fully works.
+- Stores: plain writes like musl (NOT volatile — musl proves plain
+  stores + its barriers suffice on real hardware; the arch plan's
+  volatile rule is over-engineering. Decision recorded here per
+  principle 3: musl lo hace más simple).
+- R_TYPE/R_SYM extraction + `laddr` exactly per musl macros (B3 reads
+  them; x86_64 REL_* numeric values from include/elf.h:3004-3047 and
+  arch/x86_64/reloc.h:3-13).
+- Tests: hand-built minimal RELA tables against a fake Dso image in
+  memory — RELATIVE, SYMBOLIC (self-def), GLOB_DAT, JUMP_SLOT,
+  DTPMOD/TPOFF with a static TLS module, IRELATIVE resolver call,
+  lazy-save path. No real ELF execution (that's the Wave 2 gate
+  follow-up, not B3).
+- Proposes nothing for lib.rs (lives under `src/ldso/`, already wired).
 
 ### Wave 2 gate
 `cargo test` green + a follow-up wave boots a binary (full hello-world
