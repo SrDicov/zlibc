@@ -76,13 +76,13 @@ fn tid_word(td: *mut Thread) -> *mut c_int {
 /// through the trap frame aborts the process).
 #[cfg(target_arch = "x86_64")]
 unsafe fn raw_clone(
-    mut flags: u32,
-    mut stack: usize,
-    mut ptid: usize,
+    flags: u32,
+    stack: usize,
+    ptid: usize,
     ctid: usize,
-    mut tls: usize,
+    tls: usize,
     func: usize,
-    mut arg: usize,
+    arg: usize,
 ) -> isize {
     let mut ret: isize;
     unsafe {
@@ -107,12 +107,12 @@ unsafe fn raw_clone(
             "syscall",
             "ud2",
             "2:",
-            inlateout("rdx") flags,
-            inlateout("rsi") stack,
-            inlateout("rcx") arg,
+            in("rdx") flags,
+            in("rsi") stack,
+            in("rcx") arg,
             in("r9") func,
-            inlateout("r8") ptid,
-            inlateout("r10") tls,
+            in("r8") ptid,
+            in("r10") tls,
             ctid = in(reg) ctid,
             out("rax") ret,
             out("rdi") _,
