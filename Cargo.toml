@@ -10,10 +10,10 @@ license = "MIT"
 crate-type = ["rlib"]
 
 [dependencies]
-# Runtime helpers Rust cannot codegen inline (e.g. __udivti3 on some
-# archs). Foundational: without this, no no_std libc links.
-# If the "rust" feature name drifts upstream, adjust here.
-compiler_builtins = { version = "0.1", default-features = false, features = ["rust"] }
+# Runtime helpers Rust cannot codegen inline (e.g. integer division
+# helpers on some archs). Foundational: without this, no freestanding
+# libc links. Default features are the standard external-use set.
+compiler_builtins = "0.1"
 
 [build-dependencies]
 # None: build.rs shells out to the host gcc directly (see build.rs).
