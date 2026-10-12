@@ -36,7 +36,10 @@ jobs:
 
       - name: weak-alias nm check
         run: |
-          nm target/debug/libzlibc.rlib 2>/dev/null > nm.txt || true
+          rustc --version --verbose
+          ls -la target/debug/libzlibc.rlib
+          ar t target/debug/libzlibc.rlib || true
+          nm -a target/debug/libzlibc.rlib 2>/dev/null > nm.txt || true
           cat nm.txt
           grep -qE " [Ww] ___errno_location" nm.txt
 
