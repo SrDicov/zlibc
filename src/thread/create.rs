@@ -559,10 +559,7 @@ pub unsafe extern "C" fn __pthread_attr_setstacksize(a: *mut AttrT, size: usize)
 /// `a` must point to a valid `AttrT`; `size` must be writable.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
-pub unsafe extern "C" fn __pthread_attr_getstacksize(
-    a: *const AttrT,
-    size: *mut usize,
-) -> c_int {
+pub unsafe extern "C" fn __pthread_attr_getstacksize(a: *const AttrT, size: *mut usize) -> c_int {
     if a.is_null() || size.is_null() {
         return EINVAL;
     }
@@ -601,10 +598,7 @@ pub unsafe extern "C" fn __pthread_attr_setguardsize(a: *mut AttrT, size: usize)
 /// `a` must point to a valid `AttrT`; `size` must be writable.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
-pub unsafe extern "C" fn __pthread_attr_getguardsize(
-    a: *const AttrT,
-    size: *mut usize,
-) -> c_int {
+pub unsafe extern "C" fn __pthread_attr_getguardsize(a: *const AttrT, size: *mut usize) -> c_int {
     if a.is_null() || size.is_null() {
         return EINVAL;
     }
@@ -816,7 +810,11 @@ mod tests {
     fn save_fs() -> usize {
         let mut base: usize = 0;
         unsafe {
-            let _ = syscall2(SYS_ARCH_PRCTL, ARCH_GET_FS, core::ptr::addr_of_mut!(base) as usize);
+            let _ = syscall2(
+                SYS_ARCH_PRCTL,
+                ARCH_GET_FS,
+                core::ptr::addr_of_mut!(base) as usize,
+            );
         }
         base
     }
@@ -892,7 +890,12 @@ mod tests {
         me: usize,
     }
 
-    static mut SLOTS: [SumSlot; 4] = [SumSlot { base: 0, n: 0, out: 0, me: 0 }; 4];
+    static mut SLOTS: [SumSlot; 4] = [SumSlot {
+        base: 0,
+        n: 0,
+        out: 0,
+        me: 0,
+    }; 4];
     static FLAG: AtomicU32 = AtomicU32::new(0);
 
     /// Child code: pure GPR/atomics only. Must not touch host TLS (its
