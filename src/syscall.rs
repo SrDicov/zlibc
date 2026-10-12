@@ -272,7 +272,7 @@ mod tests {
         extern "C" {
             static ___errno_location: u8;
         }
-        let addr = unsafe { core::ptr::addr_of!(___errno_location) as *const u8 as usize };
+        let addr = core::ptr::addr_of!(___errno_location) as usize;
         assert_eq!(addr, 0, "weak alias unexpectedly resolved");
     }
 }
