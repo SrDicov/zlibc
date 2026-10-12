@@ -3,7 +3,7 @@ name = "zlibc"
 version = "0.1.0"
 edition = "2021"
 description = "Rust rewrite of musl libc (ABI-exact, no_std)"
-license = "MIT"
+license = "GPL-3.0-only"
 
 [lib]
 # rlib for now; cdylib/staticlib once the linkable libc is assembled.

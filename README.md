@@ -63,6 +63,7 @@ Every push and PR is built and tested on GitHub Actions (host build,
 
 ## License
 
-MIT — see [LICENSE](LICENSE). This is an independent reimplementation
-inspired by musl's design; it contains no musl source code. The build
-probe *reads* musl headers at compile time but ships no part of them.
+GPL-3.0-only — see [LICENSE](LICENSE). This is an independent
+reimplementation inspired by musl's design; it contains no musl source
+code. The build probe *reads* musl headers at compile time but ships
+no part of them.

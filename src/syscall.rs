@@ -13,6 +13,13 @@ pub const SYS_WRITE: usize = 1; // TODO: generate from arch bits/syscall.h
 
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
+/// Raw 0-arg syscall.
+///
+/// # Safety
+///
+/// Executes the `syscall` instruction with the given number. The caller
+/// must ensure `n` is a valid syscall number and that entering the
+/// kernel with no arguments is sound (no memory is touched by this).
 pub unsafe fn syscall0(n: usize) -> isize {
     let ret: isize;
     unsafe {
@@ -27,6 +34,12 @@ pub unsafe fn syscall0(n: usize) -> isize {
 
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
+/// Raw 1-arg syscall.
+///
+/// # Safety
+///
+/// Like [`syscall0`]; additionally `a1` is passed in `rdi`, so the
+/// caller must ensure the callee may legally observe that word.
 pub unsafe fn syscall1(n: usize, a1: usize) -> isize {
     let ret: isize;
     unsafe {
@@ -42,6 +55,11 @@ pub unsafe fn syscall1(n: usize, a1: usize) -> isize {
 
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
+/// Raw 2-arg syscall.
+///
+/// # Safety
+///
+/// Like [`syscall1`]; `a1`/`a2` go in `rdi`/`rsi`.
 pub unsafe fn syscall2(n: usize, a1: usize, a2: usize) -> isize {
     let ret: isize;
     unsafe {
@@ -57,6 +75,11 @@ pub unsafe fn syscall2(n: usize, a1: usize, a2: usize) -> isize {
 
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
+/// Raw 3-arg syscall.
+///
+/// # Safety
+///
+/// Like [`syscall1`]; `a1`/`a2`/`a3` go in `rdi`/`rsi`/`rdx`.
 pub unsafe fn syscall3(n: usize, a1: usize, a2: usize, a3: usize) -> isize {
     let ret: isize;
     unsafe {
@@ -72,9 +95,16 @@ pub unsafe fn syscall3(n: usize, a1: usize, a2: usize, a3: usize) -> isize {
 
 /// musl `__syscall_ret`: kernel returns -4095..-1 on error.
 /// Negate to get the errno, store via `__errno_location`, return -1.
+///
+/// # Safety
+///
+/// `r` must be a value returned by one of the raw `syscallN`
+/// wrappers. On the error path this writes the current thread's errno
+/// through the `__errno_location` symbol, which must resolve at link
+/// time to musl-compatible thread-local storage.
 #[inline(always)]
 pub unsafe fn syscall_ret(r: isize) -> isize {
-    if r >= -4095 && r <= -1 {
+    if (-4095..=-1).contains(&r) {
         unsafe {
             *__errno_location() = (-r) as c_int;
         }
