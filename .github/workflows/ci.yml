@@ -35,18 +35,4 @@ jobs:
         run: cargo build --verbose --target x86_64-unknown-linux-musl
 
       - name: Test (runs build.rs ABI probe + asserts + unit tests)
-        run: 'timeout 100 cargo test --verbose -- --skip thread::'
-      # DIAG ONLY (revert): bisect the thread-test hang/crash in isolation,
-      # each bounded so a hang fails fast instead of burning hours.
-      - name: Test thread create only
-        run: 'timeout 100 cargo test --verbose -- thread::create:: --test-threads=1'
-      - name: Test synccall only
-        run: 'timeout 100 cargo test --verbose -- thread::synccall --test-threads=1'
-      # DIAG ONLY gdb lifecycle crash (revert): backtrace + regs.
-      - name: DIAG gdb lifecycle crash
-        if: always()
-        run: |
-          sudo apt-get install -y gdb
-          cargo test --no-run --verbose
-          BIN=$(ls -t target/debug/deps/zlibc-* | grep -v '\.' | head -1)
-          timeout 120 gdb -batch -ex 'set confirm off' -ex run -ex 'thread apply all bt 12' -ex 'info registers rip rsp fs_base' --args "$BIN" thread::create:: --test-threads=1 --nocapture | tail -70
+        run: cargo test --verbose
