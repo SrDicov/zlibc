@@ -337,6 +337,12 @@ use-after-unmap nondeterminista.
   stress): one serial-step SIGSEGV inside the D5 test, no output line —
   shared-heap/trampoline timing suspect, no evidence; do not chase
   without a backtrace.
+- **Wave 5 follow-ups** — v0.8: fixed the join/unmap race behind the
+  flake (null-rip cores): the joiner could unmap a child's stack between
+  its `DT_EXITED` store and its `SYS_EXIT` while the child still ran a
+  `wake` *call*; exit now publishes + wakes + dies in one opaque
+  registers-only trap block (musl's store+wake barrier discipline).
+  Validated by 60/60 clean trap-loop iterations plus a green suite.
 - **Wave 5** — a real binary on zlibc only. Packet 1 DONE (v0.5):
   `hello/` consumer crate (`panic=abort`, `-nostdlib` scoped from its
   own build script so host build tools keep working, `rust_eh_personality`
