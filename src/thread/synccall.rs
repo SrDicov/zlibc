@@ -551,7 +551,12 @@ mod tests {
             }
             assert_eq!(PROBE_HIT.load(Ordering::SeqCst), 1, "handler never ran");
             // Leave no trace: restore default disposition.
-            let dfl = KernelSigaction { handler: 0, flags: 0, restorer: 0, mask: 0 };
+            let dfl = KernelSigaction {
+                handler: 0,
+                flags: 0,
+                restorer: 0,
+                mask: 0,
+            };
             let _ = syscall4(
                 SYS_RT_SIGACTION,
                 SIG_PROBE as usize,
