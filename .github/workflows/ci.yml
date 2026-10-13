@@ -42,8 +42,3 @@ jobs:
       # The errno test clones a real thread, so it rides along here.
       - name: Test thread (serial)
         run: 'timeout 120 cargo test --verbose -- thread:: errno::tests::errno_is_per_thread --test-threads=1'
-      # DIAG ONLY malloc isolation (revert): malloc tests alone, serial,
-      # bounded. Discriminates allocator-concurrency hang vs deterministic.
-      - name: DIAG malloc alone serial
-        if: always()
-        run: 'timeout 100 cargo test --verbose -- malloc:: --test-threads=1'

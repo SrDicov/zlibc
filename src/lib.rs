@@ -15,6 +15,7 @@ pub mod malloc;
 pub mod mem;
 pub mod panic;
 pub mod start;
+pub mod stdio;
 pub mod symbols;
 pub mod sync;
 pub mod syscall;
