@@ -555,8 +555,44 @@ mod tests {
         (live, blk, pnd, cgt)
     }
 
-    /// Delivery probe (diagnostic ladder step 1): a trivial handler
-    /// installed through OUR `KernelSigaction` path for an otherwise
+    static HOST_HIT: AtomicU32 = AtomicU32::new(0);
+
+    /// Host-oracle handler (installed via glibc, not our path).
+    ///
+    /// # Safety
+    ///
+    /// Runs only as a signal handler; touches one static counter.
+    unsafe extern "C" fn host_handler(_sig: c_int) {
+        HOST_HIT.store(1, Ordering::SeqCst);
+    }
+
+    /// DIAG oracle: can this environment deliver signals AT ALL? Installs
+    /// a trivial handler for SIGUSR1 through HOST glibc (`signal`) and
+    /// raises it. If THIS fails, the runner/container eats signals and no
+    /// amount of fixing our install path matters — stop and investigate
+    /// the environment instead. If it passes, our install path is at
+    /// fault, period.
+    #[test]
+    #[allow(function_casts_as_integer)]
+    fn host_signal_delivery_works() {
+        extern "C" {
+            fn signal(sig: c_int, handler: usize) -> usize;
+            fn raise(sig: c_int) -> c_int;
+        }
+        unsafe {
+            signal(10, host_handler as usize);
+            HOST_HIT.store(0, Ordering::SeqCst);
+            assert_eq!(raise(10), 0);
+            let mut spins = 0u32;
+            while HOST_HIT.load(Ordering::SeqCst) == 0 && spins < 10_000_000 {
+                core::hint::spin_loop();
+                spins += 1;
+            }
+            assert_eq!(HOST_HIT.load(Ordering::SeqCst), 1, "host cannot deliver signals here");
+        }
+    }
+
+    /// Delivery probe (diagnostic ladder step 1): a trivial handler    /// installed through OUR `KernelSigaction` path for an otherwise
     /// unused RT signal must run when we tkill ourselves. Minimal flags
     /// (no ONSTACK, empty mask) to isolate install/delivery/entry from
     /// wave logic. Bounded spin: a hang becomes a message, never a CI
