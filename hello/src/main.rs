@@ -10,6 +10,16 @@
 
 use core::ffi::{c_char, c_int};
 
+/// Unwinder personality stub: unreachable under this crate's
+/// `panic=abort`, but prebuilt `core` objects reference the symbol and
+/// `-nostdlib` drops the library that would otherwise provide it. Kept
+/// here (not in the lib) so a future unwinding world still gets a link
+/// error instead of a silent abort.
+#[no_mangle]
+pub extern "C" fn rust_eh_personality() -> ! {
+    loop {}
+}
+
 /// Application entry for our `_start_c` (exact signature it calls).
 /// Returns through `exit` in stage-2, exercising that path too.
 #[no_mangle]
