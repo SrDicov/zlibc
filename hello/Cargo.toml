@@ -1,0 +1,12 @@
+[package]
+name = "hello"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+zlibc = { path = ".." }
+
+# No unwinder without a host libc (stable has no personality lang
+# item): the whole hello world aborts on panic instead.
+[profile.dev]
+panic = "abort"

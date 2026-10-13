@@ -26,10 +26,7 @@ jobs:
         run: cargo fmt --check
 
       - name: Clippy
-        # --lib --tests (not --all-targets): the hello example needs
-        # panic=abort, which only its own build step sets; unwinding
-        # without std has no personality lang item on stable.
-        run: cargo clippy --lib --tests -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Build (host)
         run: cargo build --verbose
@@ -47,10 +44,13 @@ jobs:
       - name: Test thread (serial)
         run: 'timeout 120 cargo test --verbose -- thread:: errno::tests::errno_is_per_thread validation:: --test-threads=1'
       # Wave 5 gate packet 1: a real binary on zlibc only (our `_start`,
-      # no host libc). Rebuilds everything with abort+nostdlib; asserts
-      # the exact bytes and the exit status.
+      # no host libc). The hello crate builds itself (abort + nostdlib);
+      # this step asserts the exact bytes and the exit status.
       - name: Hello on zlibc only
         run: |
-          RUSTFLAGS="-C panic=abort -C link-arg=-nostdlib" cargo build --verbose --example hello
-          out=$(./target/debug/examples/hello)
+          cd hello
+          cargo fmt --check
+          cargo clippy -- -D warnings
+          cargo build --verbose
+          out=$(./target/debug/hello)
           test "$out" = "hello from zlibc"
