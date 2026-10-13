@@ -128,10 +128,9 @@ mod tests {
             *mine = 0;
         }
         // A fresh host thread never ran our clone path: same global cell.
-        let host_cell =
-            std::thread::spawn(|| unsafe { super::__errno_location() } as usize)
-                .join()
-                .unwrap();
+        let host_cell = std::thread::spawn(|| unsafe { super::__errno_location() } as usize)
+            .join()
+            .unwrap();
         assert_eq!(host_cell, mine as usize);
         // Our clone()d thread: a different cell, value contained.
         CHILD_CELL.store(0, Ordering::SeqCst);
