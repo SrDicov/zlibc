@@ -336,10 +336,10 @@ pub unsafe extern "C" fn fopen(path: *const c_char, mode: *const c_char) -> *mut
             return null_mut();
         }
         let mut m = mode;
-        let mut flags = match *m {
-            b'r' as c_char => O_RDONLY,
-            b'w' as c_char => O_WRONLY | O_CREAT | O_TRUNC,
-            b'a' as c_char => O_WRONLY | O_CREAT | O_APPEND,
+        let mut flags = match *m as u8 {
+            b'r' => O_RDONLY,
+            b'w' => O_WRONLY | O_CREAT | O_TRUNC,
+            b'a' => O_WRONLY | O_CREAT | O_APPEND,
             _ => {
                 set_err(EINVAL);
                 return null_mut();
@@ -349,10 +349,10 @@ pub unsafe extern "C" fn fopen(path: *const c_char, mode: *const c_char) -> *mut
         let mut plus = false;
         let mut cloexec = false;
         while *m != 0 {
-            match *m {
-                b'+' as c_char => plus = true,
-                b'e' as c_char => cloexec = true,
-                b'b' as c_char => {}
+            match *m as u8 {
+                b'+' => plus = true,
+                b'e' => cloexec = true,
+                b'b' => {}
                 _ => {
                     set_err(EINVAL);
                     return null_mut();
