@@ -1,9 +1,9 @@
 //! Wave 5 gate, packet 1: a real binary running on zlibc only.
 //!
 //! `_start` + `__libc_start_main` + `puts` + `exit` are all ours; the
-//! kernel is the only other party. Build with `-nostdlib` (our `_start`
-//! replaces the toolchain's, no host libc at all) and `panic=abort`
-//! (no unwinder without a host libc).
+//! kernel is the only other party. Linked with `-nostdlib` (scoped from
+//! `build.rs` so host build tools keep their start files) and built
+//! under `panic=abort` (no unwinder without a host libc).
 
 #![no_std]
 #![no_main]

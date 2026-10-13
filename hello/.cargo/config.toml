@@ -1,3 +1,0 @@
-# Our `_start` replaces the toolchain's: no start files, no host libc.
-[build]
-rustflags = ["-C", "link-arg=-nostdlib"]
