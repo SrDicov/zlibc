@@ -345,6 +345,13 @@ use-after-unmap nondeterminista.
   Packet 2 DONE (v0.6): `hello-threads` — clone/join + `printf` in a real
   binary, covering the path unit tests never touch (`ensure_main_tp`
   taking over `FS` at real boot instead of early-returning for glibc).
+  Packets 3-4 DONE (v0.7): `hello-malloc` (three size classes,
+  calloc-zero, realloc-grow, formatted report) and `hello-args` (real
+  kernel argc/argv plus one pinned env var, `argv[0]` excluded as
+  runner-dependent). Toolchain lessons: a bin with zero `zlibc::` paths
+  never loads the rlib metadata, so `extern crate zlibc;` is
+  load-bearing for the panic handler (proven by removal); a `main` that
+  dereferences argv must be `unsafe fn`.
 
 ## "100% done" criteria
 
