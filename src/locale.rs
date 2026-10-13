@@ -108,7 +108,7 @@ unsafe fn store_name(k: usize, bytes: &[u8]) {
 pub unsafe extern "C" fn setlocale(cat: c_int, name: *const c_char) -> *mut c_char {
     unsafe {
         ensure_init();
-        if cat < 0 || cat > LC_ALL {
+        if !(0..=LC_ALL).contains(&cat) {
             return core::ptr::null_mut();
         }
         if name.is_null() {
@@ -226,9 +226,14 @@ static mut POSIX_LCONV: Lconv = Lconv {
 };
 
 /// Numeric formatting conventions for the C locale (musl `localeconv`).
+///
+/// # Safety
+///
+/// The returned pointer stays valid forever (static storage); the
+/// pointee must only be read, never written.
 #[no_mangle]
 pub unsafe extern "C" fn localeconv() -> *mut Lconv {
-    unsafe { addr_of_mut!(POSIX_LCONV) }
+    addr_of_mut!(POSIX_LCONV)
 }
 
 #[cfg(test)]
