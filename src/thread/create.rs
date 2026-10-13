@@ -10,7 +10,7 @@ use core::ptr::null_mut;
 use core::sync::atomic::Ordering;
 
 use crate::abi::PthreadT;
-use crate::futex::{futex_wait_private, futex_wake_private};
+use crate::futex::futex_wait_private;
 use crate::ldso::{MAP_ANONYMOUS, MAP_PRIVATE, PAGE_SIZE, PROT_NONE, PROT_READ, PROT_WRITE};
 use crate::syscall::{syscall1, syscall2, syscall3, syscall6, syscall_ret};
 
@@ -48,6 +48,9 @@ fn round_page(x: usize) -> Option<usize> {
 fn detach_word(td: *mut Thread) -> *mut c_int {
     unsafe { core::ptr::addr_of_mut!((*td).detach_state).cast::<c_int>() }
 }
+
+/// Byte offset of the `detach_state` word (exit sequence below).
+const DETACH_OFF: usize = core::mem::offset_of!(super::Thread, detach_state);
 
 /// Address of the `tid` word (no dereference).
 fn tid_word(td: *mut Thread) -> *mut c_int {
@@ -178,11 +181,41 @@ unsafe fn thread_exit(td: *mut Thread, res: *mut c_void) -> ! {
         };
         if st == DT_JOINABLE {
             super::synccall::unregister_thread(td); // C3: unlink before DT_EXITED wakes join.
-            (*td).detach_state.store(DT_EXITED, Ordering::SeqCst);
-            let _ = futex_wake_private(detach_word(td), 1);
-            syscall1(SYS_EXIT, 0);
-            loop {
-                syscall1(SYS_EXIT, 0);
+            // Publish death, then wake + die WITHOUT touching memory
+            // again: the joiner may unmap this stack the instant EXITED
+            // is visible, so everything past the store is registers-only
+            // inside one opaque block. A plain `wake` call uses the stack
+            // (call + body spills) — the joiner freeing it mid-call was
+            // the flaky SIGSEGV (null-rip cores in lifecycle/validation).
+            // Store discipline mirrors musl (plain store + wake trap as
+            // the barrier; TSO orders it before the traps below). No
+            // ENOSYS fallback: PRIVATE needs 2.6.22+, like all of NPTL.
+            unsafe {
+                core::arch::asm!(
+                    "mov dword ptr [{td} + {off}], {exited}",
+                    "lea rdi, [{td} + {off}]",
+                    "mov esi, {op}",
+                    "mov edx, 1",
+                    "mov eax, {sys}",
+                    "syscall",
+                    "xor edi, edi",
+                    "mov eax, {esys}",
+                    "syscall",
+                    "ud2",
+                    td = in(reg) td,
+                    off = const DETACH_OFF,
+                    exited = const DT_EXITED,
+                    op = const { crate::futex::FUTEX_WAKE | crate::futex::FUTEX_PRIVATE },
+                    sys = const crate::futex::SYS_FUTEX,
+                    esys = const SYS_EXIT,
+                    out("rax") _,
+                    out("rdi") _,
+                    out("rsi") _,
+                    out("rdx") _,
+                    out("rcx") _,
+                    out("r11") _,
+                    options(noreturn),
+                );
             }
         } else {
             // C3: unlink before __unmapself frees us.
