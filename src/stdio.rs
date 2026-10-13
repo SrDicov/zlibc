@@ -234,7 +234,12 @@ unsafe fn fill_locked(f: *mut File) -> bool {
             return false;
         }
         loop {
-            let r = syscall_ret(syscall3(SYS_READ, (*f).fd as usize, (*f).buf as usize, (*f).cap));
+            let r = syscall_ret(syscall3(
+                SYS_READ,
+                (*f).fd as usize,
+                (*f).buf as usize,
+                (*f).cap,
+            ));
             if r == -1 {
                 if *__errno_location() == EINTR {
                     continue;
