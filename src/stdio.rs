@@ -752,11 +752,16 @@ impl Ap {
 /// C-variadic entry: spills the caller's register file and tail-calls
 /// the inner formatter. Callers pass args per SysV as usual.
 ///
+/// Contract (single source for all three instantiations; the lint
+/// cannot see docs through the expansion, hence the allow below):
+/// same safety contract as the inner function.
+///
 /// # Safety
 ///
 /// Same contract as the inner function.
 macro_rules! va_trampoline {
     ($name:ident, $inner:ident, $gp:expr, $tagsetup:literal) => {
+        #[allow(clippy::missing_safety_doc)]
         #[unsafe(naked)]
         pub unsafe extern "C" fn $name() {
             core::arch::naked_asm!(
@@ -791,23 +796,8 @@ macro_rules! va_trampoline {
     };
 }
 
-/// C-variadic `printf` (naked tag builder; see macro docs).
-///
-/// # Safety
-///
-/// `fmt` valid, trailing args matching it.
 va_trampoline!(printf, printf_inner, 8, "lea rsi, [rsp+176]");
-/// C-variadic `fprintf`.
-///
-/// # Safety
-///
-/// `f` live, `fmt` valid, trailing args matching it.
 va_trampoline!(fprintf, fprintf_inner, 16, "lea rdx, [rsp+176]");
-/// C-variadic `snprintf`.
-///
-/// # Safety
-///
-/// `s` writable for `n` bytes, `fmt` valid, trailing args matching it.
 va_trampoline!(snprintf, snprintf_inner, 24, "lea rcx, [rsp+176]");
 
 /// `printf` body: stdout + caller-built tag (see [`va_trampoline`]).
@@ -927,13 +917,13 @@ fn parse_uint(fmt: *const u8, pos: &mut usize) -> usize {
 }
 
 /// One parsed conversion (driver → convert, single argument).
+/// (`narrow` stays driver-local for `%n`; convert never needs it.)
 struct Spec {
     spec: u8,
     flags: u8,
     width: usize,
     prec: isize,
     wide: u8,
-    narrow: u8,
 }
 
 /// Integer render request (convert → int_emit, single argument).
@@ -1297,7 +1287,6 @@ unsafe fn fmt_driver(sink: &mut Sink, fmt: *const c_char, mut ap: Ap) -> c_int {
                 width,
                 prec,
                 wide,
-                narrow,
             };
             convert(&mut out, &sp, &mut ap);
             if out.failed {
@@ -1484,8 +1473,8 @@ mod tests {
                 c"hello".as_ptr(),
                 42 as c_int,
                 8 as c_int,
-                9 as i64,
-                10 as u64,
+                9_i64,
+                10_u64,
                 &mut n1,
                 11 as c_int,
                 &mut n2,
