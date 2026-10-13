@@ -512,10 +512,15 @@ mod tests {
         PROBE_HIT.store(1, Ordering::SeqCst);
     }
 
-    /// Ground truth from the kernel: (blocked, pending, caught) masks.
-    /// std::fs exists in tests; pure parsing, no unsafe.
+    /// Ground truth from the kernel: (blocked, pending, caught) masks
+    /// for the CALLING thread (task view — the process view aliases the
+    /// main thread and lies about workers). std::fs exists in tests;
+    /// pure parsing, no unsafe.
     fn sig_state() -> (u64, u64, u64) {
-        let s = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+        use crate::syscall::syscall0;
+        let tid = unsafe { syscall0(186) };
+        let path = std::format!("/proc/self/task/{tid}/status");
+        let s = std::fs::read_to_string(&path).unwrap_or_default();
         let mut blk = 0u64;
         let mut pnd = 0u64;
         let mut cgt = 0u64;
