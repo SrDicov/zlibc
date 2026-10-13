@@ -48,6 +48,7 @@ jobs:
       - name: DIAG core trap serial flake
         if: always()
         run: |
+          sudo apt-get install -y gdb
           sudo sysctl -w kernel.core_pattern=/tmp/zlibc-core-%p || true
           ulimit -c unlimited
           cargo test --no-run --verbose
