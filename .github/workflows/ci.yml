@@ -71,7 +71,10 @@ jobs:
             echo "== clippy $b =="
             cargo clippy --bin "$b" -- -D warnings || exit 1
           done
-          cargo build --verbose
+          for b in hello hello-threads hello-malloc hello-args; do
+            echo "== build $b =="
+            cargo build --bin "$b" --verbose || exit 1
+          done
           out=$(./target/debug/hello)
           test "$out" = "hello from zlibc"
           out=$(./target/debug/hello-threads)

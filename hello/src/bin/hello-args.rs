@@ -44,8 +44,11 @@ unsafe fn getenv(envp: *mut *mut c_char, key: *const u8, klen: usize) -> *const 
 }
 
 /// Application entry for our `_start_c` (exact signature it calls).
+/// Unsafe: dereferences the raw `argv`/`envp` vectors (valid by kernel
+/// contract, but the type system cannot see it — same reason musl's
+/// `main` is only safe to call correctly).
 #[no_mangle]
-pub extern "C" fn main(argc: c_int, argv: *mut *mut c_char, envp: *mut *mut c_char) -> c_int {
+pub unsafe extern "C" fn main(argc: c_int, argv: *mut *mut c_char, envp: *mut *mut c_char) -> c_int {
     unsafe {
         printf(c"argc=%d\n".as_ptr(), argc);
         let mut i = 1isize;
