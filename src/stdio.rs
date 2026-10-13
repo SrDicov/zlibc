@@ -762,6 +762,7 @@ impl Ap {
 macro_rules! va_trampoline {
     ($name:ident, $inner:ident, $gp:expr, $tagsetup:literal) => {
         #[allow(clippy::missing_safety_doc)]
+        #[no_mangle]
         #[unsafe(naked)]
         pub unsafe extern "C" fn $name() {
             core::arch::naked_asm!(
