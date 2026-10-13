@@ -50,4 +50,4 @@ jobs:
           sudo apt-get install -y gdb
           cargo test --no-run --verbose
           BIN=$(ls -t target/debug/deps/zlibc-* | grep -v '\.' | head -1)
-          timeout 120 gdb -batch -ex 'set confirm off' -ex 'break zlibc::thread::synccall::synccall_handler' -ex run -ex 'bt 8' -ex 'info registers rip rsp fs_base' -ex 'stepi 8' -ex 'bt 5' --args "$BIN" thread::synccall --test-threads=1 --nocapture | tail -50
+          timeout 120 gdb -batch -ex 'set confirm off' -ex run -ex 'bt 25' -ex 'info registers rip rsp fs_base' --args "$BIN" thread::create:: --test-threads=1 --nocapture | tail -60
