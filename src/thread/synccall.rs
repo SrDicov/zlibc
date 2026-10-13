@@ -501,6 +501,67 @@ mod tests {
         null_mut()
     }
 
+    static PROBE_HIT: AtomicU32 = AtomicU32::new(0);
+
+    /// Trivial wave-independent handler for the delivery probe below.
+    ///
+    /// # Safety
+    ///
+    /// Runs only as a signal handler; touches one static counter.
+    unsafe extern "C" fn probe_handler(_sig: c_int) {
+        PROBE_HIT.store(1, Ordering::SeqCst);
+    }
+
+    /// Delivery probe (diagnostic ladder step 1): a trivial handler
+    /// installed through OUR `KernelSigaction` path for an otherwise
+    /// unused RT signal must run when we tkill ourselves. Minimal flags
+    /// (no ONSTACK, empty mask) to isolate install/delivery/entry from
+    /// wave logic. Bounded spin: a hang becomes a message, never a CI
+    /// timeout. If this passes and the wave still hangs, the fault is in
+    /// wave protocol, not delivery.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn signal_delivery_runs_handler() {
+        use crate::syscall::{syscall0, syscall2, syscall4};
+        const SIG_PROBE: c_int = 35; // SIGRTMIN+3, unused anywhere else
+        const SYS_GETTID: usize = 186; // TODO: share with sync.rs
+        unsafe {
+            let act = KernelSigaction {
+                handler: probe_handler as *const () as usize,
+                flags: 0,
+                restorer: 0,
+                mask: 0,
+            };
+            let r = syscall4(
+                SYS_RT_SIGACTION,
+                SIG_PROBE as usize,
+                core::ptr::addr_of!(act) as usize,
+                0,
+                K_SIGSET_LEN,
+            );
+            assert_eq!(r, 0, "rt_sigaction install failed: {r}");
+            let tid = syscall0(SYS_GETTID);
+            PROBE_HIT.store(0, Ordering::SeqCst);
+            let r = syscall2(SYS_TKILL, tid as usize, SIG_PROBE as usize);
+            assert_eq!(r, 0, "tkill self failed: {r}");
+            let mut spins = 0u32;
+            while PROBE_HIT.load(Ordering::SeqCst) == 0 && spins < 10_000_000 {
+                core::hint::spin_loop();
+                spins += 1;
+            }
+            assert_eq!(PROBE_HIT.load(Ordering::SeqCst), 1, "handler never ran");
+            // Leave no trace: restore default disposition.
+            let dfl = KernelSigaction { handler: 0, flags: 0, restorer: 0, mask: 0 };
+            let _ = syscall4(
+                SYS_RT_SIGACTION,
+                SIG_PROBE as usize,
+                core::ptr::addr_of!(dfl) as usize,
+                0,
+                K_SIGSET_LEN,
+            );
+        }
+    }
+
     /// One wave over N spinning children runs the callback exactly N times
     /// on targets plus once on the caller. Retries on contamination: the
     /// registry is process-global, so another test's threads may be caught
