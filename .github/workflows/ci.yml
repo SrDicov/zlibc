@@ -34,14 +34,10 @@ jobs:
       - name: Build (x86_64-unknown-linux-musl)
         run: cargo build --verbose --target x86_64-unknown-linux-musl
 
-      - name: Test (runs build.rs ABI probe + asserts + unit tests)
-        run: cargo test --verbose
-      # DIAG ONLY full-suite death backtrace (revert): run everything
-      # under gdb, catch whatever dies in parallel.
-      - name: DIAG gdb full suite death
-        if: always()
-        run: |
-          sudo apt-get install -y gdb
-          cargo test --no-run --verbose
-          BIN=$(ls -t target/debug/deps/zlibc-* | grep -v '\.' | head -1)
-          timeout 120 gdb -batch -ex 'set confirm off' -ex run -ex 'thread apply all bt 10' -ex 'info registers rip rsp fs_base' --args "$BIN" --test-threads=8 --nocapture | tail -80
+      - name: Test (non-thread, parallel)
+        run: cargo test --verbose -- --skip thread::
+      # Thread tests touch per-thread CPU state (FS) and process-global
+      # signal dispositions/registry: serial by design, like musl's own
+      # tests. Parallel cargo threads would interleave that global state.
+      - name: Test thread (serial)
+        run: cargo test --verbose -- thread:: --test-threads=1

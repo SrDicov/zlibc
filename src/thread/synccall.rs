@@ -605,6 +605,7 @@ mod tests {
                 1,
                 "host cannot deliver signals here"
             );
+            signal(10, 0); // restore DFL: never leak a handler into other tests
         }
     }
 
