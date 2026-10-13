@@ -42,11 +42,11 @@ jobs:
         run: 'timeout 100 cargo test --verbose -- thread::create:: --test-threads=1'
       - name: Test synccall only
         run: 'timeout 100 cargo test --verbose -- thread::synccall::tests::signal_delivery --test-threads=1'
-      # DIAG ONLY nm handler addresses (revert): proves whether the
-      # installed handler address equals the real symbol.
-      - name: DIAG nm handler symbols
+      # DIAG ONLY gdb lifecycle crash (revert): backtrace + regs.
+      - name: DIAG gdb lifecycle crash
         if: always()
         run: |
+          sudo apt-get install -y gdb
+          cargo test --no-run --verbose
           BIN=$(ls -t target/debug/deps/zlibc-* | grep -v '\.' | head -1)
-          echo "binary: $BIN"
-          nm "$BIN" 2>/dev/null | grep -iE 'probe_handler|synccall_handler|count_runs|spin_child' || true
+          timeout 120 gdb -batch -ex 'set confirm off' -ex run -ex 'thread apply all bt 12' -ex 'info registers rip rsp fs_base' --args "$BIN" thread::create:: --test-threads=1 --nocapture | tail -70
