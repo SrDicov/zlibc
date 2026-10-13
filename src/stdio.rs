@@ -18,7 +18,7 @@
 //! Lock order is always stdio → heap, never the reverse (the allocator
 //! never takes the stdio lock), so no deadlock cycle exists.
 
-use core::ffi::{c_char, c_int, c_void, VaList};
+use core::ffi::{c_char, c_int, c_void};
 use core::ptr::{addr_of_mut, null, null_mut};
 
 use crate::errno::__errno_location;
@@ -674,6 +674,161 @@ pub unsafe extern "C" fn puts(s: *const c_char) -> c_int {
 // (number or `*`), `.precision`, lengths `hh h l ll j z t`. Floats consume
 // their `double` and emit nothing (packet-2 `dtoa`); unknown specs echo
 // the character (deterministic, documented). Unknown ≠ crash, ever.
+//
+// Stable Rust cannot `va_start` (nightly-only `c_variadic`), so varargs
+// are read by walking the x86_64 SysV `va_list` by hand: it is a plain
+// documented struct (GP slots below offset 48, XMM slots below 304,
+// overflow stack above), and every type we pull is ≤ 8 bytes at ≤ 8
+// alignment, which SysV always passes in plain slots. The `...` symbols
+// build the tag in a naked trampoline (spilling the caller's register
+// file exactly as compiler `va_start` would stage it); the `v*` family
+// walks caller-initialized tags with the same code.
+
+/// C `va_list` for x86_64 SysV, layout-compatible by construction
+/// (`__va_list_tag`: two offsets + overflow area + register save area).
+#[repr(C)]
+pub struct VaList {
+    gp: u32,
+    fp: u32,
+    overflow: *mut u8,
+    regsave: *mut u8,
+}
+
+/// Cursor over a [`VaList`].
+#[derive(Clone, Copy)]
+struct Ap {
+    t: *mut VaList,
+}
+
+impl Ap {
+    /// Next general slot as raw bits (registers then overflow stack).
+    unsafe fn gp(&mut self) -> u64 {
+        unsafe {
+            let t = &mut *self.t;
+            if t.gp < 48 {
+                let v = (t.regsave.add(t.gp as usize) as *const u64).read_unaligned();
+                t.gp += 8;
+                v
+            } else {
+                let v = (t.overflow as *const u64).read_unaligned();
+                t.overflow = t.overflow.add(8);
+                v
+            }
+        }
+    }
+
+    /// Skip one floating-point slot (floats ignored packet-wide).
+    unsafe fn fp_skip(&mut self) {
+        unsafe {
+            let t = &mut *self.t;
+            if t.fp < 304 {
+                t.fp += 16;
+            } else {
+                t.overflow = t.overflow.add(8);
+            }
+        }
+    }
+
+    /// Skip one 16-byte stack slot (`%Lf`: SysV MEMORY class, 16-aligned).
+    unsafe fn stk16(&mut self) {
+        unsafe {
+            let t = &mut *self.t;
+            t.overflow = (((t.overflow as usize + 15) & !15) + 16) as *mut u8;
+        }
+    }
+}
+
+/// Build a SysV `VaList` on our own stack and tail-call `$inner`.
+/// Spills the whole vararg register file (GP + XMM) into a private
+/// 304-byte area, so the walker sees exactly what `va_start` would have
+/// staged. `$gp` is 8 × named GP args; FP always starts at 48 (no named
+/// FP args); overflow is the first stack arg above the return address.
+/// Stack discipline: entry `rsp % 16 == 8`, minus 312 keeps `% 16 == 0`,
+/// so the inner `call` lands SysV-clean.
+///
+/// C-variadic entry: spills the caller's register file and tail-calls
+/// the inner formatter. Callers pass args per SysV as usual.
+///
+/// # Safety
+///
+/// Same contract as the inner function.
+macro_rules! va_trampoline {
+    ($name:ident, $inner:ident, $gp:expr, $tagsetup:literal) => {
+        #[unsafe(naked)]
+        pub unsafe extern "C" fn $name() {
+            core::arch::naked_asm!(
+                "mov rax, rsp",
+                "sub rsp, 312",
+                "mov [rsp], rsi",
+                "mov [rsp+8], rdx",
+                "mov [rsp+16], rcx",
+                "mov [rsp+24], r8",
+                "mov [rsp+32], r9",
+                "movups [rsp+48], xmm0",
+                "movups [rsp+64], xmm1",
+                "movups [rsp+80], xmm2",
+                "movups [rsp+96], xmm3",
+                "movups [rsp+112], xmm4",
+                "movups [rsp+128], xmm5",
+                "movups [rsp+144], xmm6",
+                "movups [rsp+160], xmm7",
+                "mov dword ptr [rsp+176], {gp}",
+                "mov dword ptr [rsp+180], 48",
+                "lea rcx, [rax+8]",
+                "mov [rsp+184], rcx",
+                "mov [rsp+192], rsp",
+                $tagsetup,
+                "call {inner}",
+                "add rsp, 312",
+                "ret",
+                gp = const $gp,
+                inner = sym $inner,
+            )
+        }
+    };
+}
+
+va_trampoline!(printf, printf_inner, 8, "lea rsi, [rsp+176]");
+va_trampoline!(fprintf, fprintf_inner, 16, "lea rdx, [rsp+176]");
+va_trampoline!(snprintf, snprintf_inner, 24, "lea rcx, [rsp+176]");
+
+/// `printf` body: stdout + caller-built tag (see [`va_trampoline`]).
+///
+/// # Safety
+///
+/// `fmt` valid; `tag` a live tag whose remaining args match it.
+unsafe fn printf_inner(fmt: *const c_char, tag: *mut VaList) -> c_int {
+    unsafe {
+        slock();
+        ensure_locked();
+        let f = addr_of_mut!(STDOUT_FILE);
+        sunlock();
+        vfprintf(f, fmt, tag)
+    }
+}
+
+/// `fprintf` body.
+///
+/// # Safety
+///
+/// `f` live; otherwise like [`printf_inner`].
+unsafe fn fprintf_inner(f: *mut File, fmt: *const c_char, tag: *mut VaList) -> c_int {
+    unsafe { vfprintf(f, fmt, tag) }
+}
+
+/// `snprintf` body.
+///
+/// # Safety
+///
+/// `s` writable for `n` bytes; otherwise like [`printf_inner`].
+unsafe fn snprintf_inner(
+    s: *mut c_char,
+    n: usize,
+    fmt: *const c_char,
+    tag: *mut VaList,
+) -> c_int {
+    unsafe { vsnprintf(s, n, fmt, tag) }
+}
 
 enum Sink {
     Fd(c_int),
@@ -758,8 +913,8 @@ fn parse_uint(fmt: *const u8, pos: &mut usize) -> usize {
     v
 }
 
-/// Format one conversion; `spec` selects, `aref` carries width/precision
-/// state. Returns through `out`; reads exactly the args it needs.
+/// Format one conversion; `spec` selects. Returns through `out`;
+/// reads exactly the args it needs from the walker.
 unsafe fn convert(
     out: &mut Out,
     spec: u8,
@@ -771,7 +926,8 @@ unsafe fn convert(
     neg: bool,
     word: *const u8,
     wlen: usize,
-    ap: &mut VaList,
+    wide: u8,
+    ap: &mut Ap,
 ) {
     // Flags: bit0 '-', bit1 '+', bit2 ' ', bit3 '0', bit4 '#'.
     unsafe {
@@ -787,7 +943,7 @@ unsafe fn convert(
                 let mut fl = flags;
                 let v = if spec == b'p' {
                     fl |= 0x30;
-                    ap.arg::<usize>() as u64
+                    ap.gp() as u64
                 } else {
                     uval
                 };
@@ -825,8 +981,13 @@ unsafe fn convert(
             }
             _ => {
                 // Floats (`f e g a`, upper too): consume, emit nothing.
+                // `L` is the 16-byte SysV MEMORY class, the rest XMM slots.
                 if matches!(spec, b'f' | b'F' | b'e' | b'E' | b'g' | b'G' | b'a' | b'A') {
-                    let _: f64 = ap.arg::<f64>();
+                    if wide == 2 {
+                        ap.stk16();
+                    } else {
+                        ap.fp_skip();
+                    }
                 } else {
                     // Unknown spec: echo deterministically, never crash.
                     out.emit(&[spec]);
@@ -924,7 +1085,7 @@ fn int_emit(
 
 /// Core driver: walk `fmt`, pull args, emit through `sink`. Returns
 /// bytes (or would-be bytes for buffers), or -1 on write error.
-unsafe fn fmt_driver(sink: &mut Sink, fmt: *const c_char, mut ap: VaList) -> c_int {
+unsafe fn fmt_driver(sink: &mut Sink, fmt: *const c_char, mut ap: Ap) -> c_int {
     unsafe {
         let mut out = Out {
             sink,
@@ -963,7 +1124,7 @@ unsafe fn fmt_driver(sink: &mut Sink, fmt: *const c_char, mut ap: VaList) -> c_i
             }
             let mut width = 0usize;
             if *f.add(i) == b'*' {
-                let w: c_int = ap.arg::<c_int>();
+                let w = ap.gp() as c_int;
                 if w < 0 {
                     flags |= 1;
                     width = (w as isize).wrapping_neg() as usize;
@@ -978,7 +1139,7 @@ unsafe fn fmt_driver(sink: &mut Sink, fmt: *const c_char, mut ap: VaList) -> c_i
             if *f.add(i) == b'.' {
                 i += 1;
                 if *f.add(i) == b'*' {
-                    let p: c_int = ap.arg::<c_int>();
+                    let p = ap.gp() as c_int;
                     prec = p as isize;
                     i += 1;
                 } else {
@@ -1005,6 +1166,10 @@ unsafe fn fmt_driver(sink: &mut Sink, fmt: *const c_char, mut ap: VaList) -> c_i
                         i += 1;
                     }
                 }
+                b'L' => {
+                    i += 1;
+                    wide = 2;
+                }
                 b'j' | b'z' | b't' => {
                     i += 1;
                     wide = 1;
@@ -1020,22 +1185,22 @@ unsafe fn fmt_driver(sink: &mut Sink, fmt: *const c_char, mut ap: VaList) -> c_i
             // picks the pointee (`hh`→i8, `h`→i16, none→int, `l*`→i64).
             if spec == b'n' {
                 if wide == 1 {
-                    let p = ap.arg::<*mut c_void>() as *mut i64;
+                    let p = ap.gp() as *mut i64;
                     if !p.is_null() {
                         *p = out.count as i64;
                     }
                 } else if narrow == 2 {
-                    let p = ap.arg::<*mut c_void>() as *mut i8;
+                    let p = ap.gp() as *mut i8;
                     if !p.is_null() {
                         *p = out.count as i8;
                     }
                 } else if narrow == 1 {
-                    let p = ap.arg::<*mut c_void>() as *mut i16;
+                    let p = ap.gp() as *mut i16;
                     if !p.is_null() {
                         *p = out.count as i16;
                     }
                 } else {
-                    let p = ap.arg::<*mut c_void>() as *mut c_int;
+                    let p = ap.gp() as *mut c_int;
                     if !p.is_null() {
                         *p = out.count as c_int;
                     }
@@ -1045,7 +1210,7 @@ unsafe fn fmt_driver(sink: &mut Sink, fmt: *const c_char, mut ap: VaList) -> c_i
             // Pull the value arg (strings/pointers read raw, never as int).
             let (uval, sval, neg, word, wlen) = match spec {
                 b's' => {
-                    let s = ap.arg::<*const c_char>() as *const u8;
+                    let s = ap.gp() as *const c_char as *const u8;
                     let mut len = 0usize;
                     if !s.is_null() {
                         while *s.add(len) != 0 {
@@ -1054,28 +1219,28 @@ unsafe fn fmt_driver(sink: &mut Sink, fmt: *const c_char, mut ap: VaList) -> c_i
                     }
                     (0, 0, false, s, len)
                 }
-                b'c' => (ap.arg::<c_int>() as u64 & 0xff, 0, false, null(), 0),
+                b'c' => (ap.gp() & 0xff, 0, false, null(), 0),
                 b'p' => (0, 0, false, null(), 0),
                 b'd' | b'i' => {
                     if wide == 1 {
-                        let v: i64 = ap.arg::<i64>();
+                        let v = ap.gp() as i64;
                         (v as u64, v, v < 0, null(), 0)
                     } else {
-                        let v: c_int = ap.arg::<c_int>();
+                        let v = ap.gp() as c_int;
                         (v as u64, v as i64, v < 0, null(), 0)
                     }
                 }
                 b'f' | b'F' | b'e' | b'E' | b'g' | b'G' | b'a' | b'A' => (0, 0, false, null(), 0),
                 _ => {
                     if wide == 1 {
-                        (ap.arg::<u64>(), 0, false, null(), 0)
+                        (ap.gp(), 0, false, null(), 0)
                     } else {
-                        (ap.arg::<c_int>() as u64 & 0xffff_ffff, 0, false, null(), 0)
+                        (ap.gp() & 0xffff_ffff, 0, false, null(), 0)
                     }
                 }
             };
             convert(
-                &mut out, spec, flags, width, prec, uval, sval, neg, word, wlen, &mut ap,
+                &mut out, spec, flags, width, prec, uval, sval, neg, word, wlen, wide, &mut ap,
             );
             if out.failed {
                 return -1;
@@ -1094,11 +1259,12 @@ unsafe fn fmt_driver(sink: &mut Sink, fmt: *const c_char, mut ap: VaList) -> c_i
 ///
 /// # Safety
 ///
-/// `f` live, `fmt` a valid format string, `ap` matching it.
+/// `f` live, `fmt` a valid format string, `ap` a live tag whose
+/// remaining args match it.
 #[no_mangle]
-pub unsafe extern "C" fn vfprintf(f: *mut File, fmt: *const c_char, ap: VaList) -> c_int {
+pub unsafe extern "C" fn vfprintf(f: *mut File, fmt: *const c_char, ap: *mut VaList) -> c_int {
     unsafe {
-        if f.is_null() || fmt.is_null() {
+        if f.is_null() || fmt.is_null() || ap.is_null() {
             set_err(EINVAL);
             return EOF;
         }
@@ -1112,7 +1278,7 @@ pub unsafe extern "C" fn vfprintf(f: *mut File, fmt: *const c_char, ap: VaList) 
             return EOF;
         }
         let mut sink = Sink::Fd((*f).fd);
-        let rc = fmt_driver(&mut sink, fmt, ap);
+        let rc = fmt_driver(&mut sink, fmt, Ap { t: ap });
         sunlock();
         rc
     }
@@ -1122,9 +1288,9 @@ pub unsafe extern "C" fn vfprintf(f: *mut File, fmt: *const c_char, ap: VaList) 
 ///
 /// # Safety
 ///
-/// Same contract as [`vfprintf`] with `f = stdout`.
+/// `fmt` valid, `ap` a live tag matching it.
 #[no_mangle]
-pub unsafe extern "C" fn vprintf(fmt: *const c_char, ap: VaList) -> c_int {
+pub unsafe extern "C" fn vprintf(fmt: *const c_char, ap: *mut VaList) -> c_int {
     unsafe {
         slock();
         ensure_locked();
@@ -1134,41 +1300,22 @@ pub unsafe extern "C" fn vprintf(fmt: *const c_char, ap: VaList) -> c_int {
     }
 }
 
-/// Formatted output to a stream (musl `fprintf`).
-///
-/// # Safety
-///
-/// `f` live, `fmt` valid, trailing args matching it.
-#[no_mangle]
-pub unsafe extern "C" fn fprintf(f: *mut File, fmt: *const c_char, mut args: ...) -> c_int {
-    unsafe { vfprintf(f, fmt, args.as_va_list()) }
-}
-
-/// Formatted output to `stdout` (musl `printf`).
-///
-/// # Safety
-///
-/// `fmt` valid, trailing args matching it.
-#[no_mangle]
-pub unsafe extern "C" fn printf(fmt: *const c_char, mut args: ...) -> c_int {
-    unsafe { vprintf(fmt, args.as_va_list()) }
-}
-
 /// Formatted output into a buffer (musl `vsnprintf`: C99 truncation +
 /// NUL rules, returns the would-be length).
 ///
 /// # Safety
 ///
-/// `s` writable for `n` bytes (or null when `n` is 0), `fmt` valid.
+/// `s` writable for `n` bytes (or null when `n` is 0), `fmt` valid,
+/// `ap` a live tag matching it.
 #[no_mangle]
 pub unsafe extern "C" fn vsnprintf(
     s: *mut c_char,
     n: usize,
     fmt: *const c_char,
-    ap: VaList,
+    ap: *mut VaList,
 ) -> c_int {
     unsafe {
-        if fmt.is_null() || (s.is_null() && n != 0) {
+        if fmt.is_null() || (s.is_null() && n != 0) || ap.is_null() {
             set_err(EINVAL);
             return EOF;
         }
@@ -1177,7 +1324,7 @@ pub unsafe extern "C" fn vsnprintf(
             cap: n,
             len: 0,
         };
-        let rc = fmt_driver(&mut sink, fmt, ap);
+        let rc = fmt_driver(&mut sink, fmt, Ap { t: ap });
         if n > 0 {
             if let Sink::Buf { base, len, .. } = sink {
                 *base.add(len.min(n - 1)) = 0;
@@ -1187,28 +1334,21 @@ pub unsafe extern "C" fn vsnprintf(
     }
 }
 
-/// Formatted output into a buffer (musl `snprintf`).
-///
-/// # Safety
-///
-/// Same contract as [`vsnprintf`], trailing args matching `fmt`.
-#[no_mangle]
-pub unsafe extern "C" fn snprintf(
-    s: *mut c_char,
-    n: usize,
-    fmt: *const c_char,
-    mut args: ...
-) -> c_int {
-    unsafe { vsnprintf(s, n, fmt, args.as_va_list()) }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{fclose, fdopen, fgetc, fputs, fread, fwrite, snprintf, EOF};
+    use super::{fclose, fdopen, fgetc, fputs, fread, fwrite, Ap, VaList, EOF};
     use core::ffi::{c_char, c_int};
     use core::ptr::null_mut;
 
     use crate::syscall::{syscall2, syscall_ret};
+
+    /// Our own C-variadic symbols (naked trampolines): foreign `...`
+    /// declarations are stable to *call*; only *reading* needs nightly.
+    extern "C" {
+        fn printf(fmt: *const c_char, ...) -> c_int;
+        fn fprintf(f: *mut super::File, fmt: *const c_char, ...) -> c_int;
+        fn snprintf(s: *mut c_char, n: usize, fmt: *const c_char, ...) -> c_int;
+    }
 
     /// musl `arch/x86_64/bits/syscall.h.in` (`SYS_pipe`, test plumbing).
     const SYS_PIPE: usize = 22;
@@ -1323,6 +1463,72 @@ mod tests {
             let want: &[u8] = b"0x1234|0x1|+1| 1|00000042||B";
             assert_eq!(rc as usize, want.len());
             assert_eq!(&pbuf[..want.len()], want);
+        }
+    }
+
+    #[test]
+    fn trampolines_and_float_skip_hold() {
+        unsafe {
+            // fprintf through its trampoline, end to end over a pipe.
+            let (r, w) = new_pipe();
+            let wf = fdopen(w, c"w".as_ptr());
+            assert_eq!(fprintf(wf, c"%s=%d\n".as_ptr(), c"k".as_ptr(), 7 as c_int), 4);
+            assert_eq!(fclose(wf), 0);
+            let rf = fdopen(r, c"r".as_ptr());
+            let mut back = [0u8; 8];
+            assert_eq!(fread(back.as_mut_ptr() as *mut _, 1, back.len(), rf), 4);
+            assert_eq!(&back[..4], b"k=7\n");
+            assert_eq!(fclose(rf), 0);
+            // printf returns the count (bytes land on fd 1, by design).
+            assert_eq!(printf(c"%d".as_ptr(), 42 as c_int), 2);
+            // A double in XMM is consumed and skipped; later args align.
+            let mut fbuf = [0u8; 16];
+            let rc = snprintf(
+                fbuf.as_mut_ptr() as *mut c_char,
+                fbuf.len(),
+                c"%d|%f|%d".as_ptr(),
+                1 as c_int,
+                3.5f64,
+                2 as c_int,
+            );
+            let want: &[u8] = b"1||2";
+            assert_eq!(rc as usize, want.len());
+            assert_eq!(&fbuf[..want.len()], want);
+        }
+    }
+
+    #[test]
+    fn walker_covers_registers_and_overflow() {
+        // Synthetic SysV tag: GP slots then overflow, FP untouched.
+        let mut regs = [0u64; 6];
+        regs[1] = 0x1122_3344_5566_7788;
+        regs[2] = 0x99aa;
+        let mut over = [0u64; 2];
+        over[0] = 0xdead;
+        over[1] = 0xbeef;
+        let mut tag = VaList {
+            gp: 8,
+            fp: 48,
+            overflow: over.as_mut_ptr() as *mut u8,
+            regsave: regs.as_mut_ptr() as *mut u8,
+        };
+        unsafe {
+            let mut ap = Ap {
+                t: &mut tag as *mut VaList,
+            };
+            assert_eq!(ap.gp(), 0x1122_3344_5566_7788);
+            assert_eq!(ap.gp(), 0x99aa);
+            // Exhaust GP: jump to the overflow area, order preserved.
+            (*ap.t).gp = 48;
+            assert_eq!(ap.gp(), 0xdead);
+            assert_eq!(ap.gp(), 0xbeef);
+            // Skips only move cursors (checked exactly, never dereferenced).
+            let fp0 = (*ap.t).fp;
+            ap.fp_skip();
+            assert_eq!((*ap.t).fp, fp0 + 16);
+            let ob = (*ap.t).overflow as usize;
+            ap.stk16();
+            assert_eq!((*ap.t).overflow as usize, ((ob + 15) & !15) + 16);
         }
     }
 }
