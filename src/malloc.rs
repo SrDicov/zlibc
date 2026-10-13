@@ -79,7 +79,7 @@ unsafe fn feed(ptr: *mut u8, len: usize) {
 /// returns while the lock is conceptually held by the caller.
 unsafe fn take(need: usize) -> *mut u8 {
     unsafe {
-        let mut link = addr_of_mut!(FREE_HEAD) as *mut *mut Chunk;
+        let mut link = addr_of_mut!(FREE_HEAD);
         while !(*link).is_null() {
             let c = *link;
             if (*c).size >= need {
