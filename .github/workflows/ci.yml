@@ -56,3 +56,13 @@ jobs:
           test "$out" = "hello from zlibc"
           out=$(./target/debug/hello-threads)
           test "$out" = "threads total 4950"
+          out=$(./target/debug/hello-malloc)
+          test "$out" = "malloc ok 16 1024 70000
+calloc zero ok
+realloc ok"
+          out=$(TEST_MARKER=zzq ./target/debug/hello-args a1 "a b" a3)
+          test "$out" = "argc=4
+argv=a1
+argv=a b
+argv=a3
+env=zzq"
