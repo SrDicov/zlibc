@@ -21,11 +21,7 @@ extern "C" {
 
 /// Application entry for our `_start_c` (exact signature it calls).
 #[no_mangle]
-pub extern "C" fn main(
-    _argc: c_int,
-    _argv: *mut *mut c_char,
-    _envp: *mut *mut c_char,
-) -> c_int {
+pub extern "C" fn main(_argc: c_int, _argv: *mut *mut c_char, _envp: *mut *mut c_char) -> c_int {
     unsafe {
         // Three size classes: list reuse, split, fresh mmap arena.
         let a = malloc(16);
