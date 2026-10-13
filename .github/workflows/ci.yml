@@ -43,19 +43,6 @@ jobs:
       # So does the D5 validation test (threads + malloc + stdio).
       - name: Test thread (serial)
         run: 'timeout 120 cargo test --verbose -- thread:: errno::tests::errno_is_per_thread validation:: --test-threads=1'
-      # DIAG ONLY trap the serial flake (revert): loop the serial filter
-      # under gdb until a SIGSEGV lands, then print the backtrace.
-      - name: DIAG gdb loop until serial SIGSEGV
-        if: always()
-        run: |
-          sudo apt-get install -y gdb
-          cargo test --no-run --verbose
-          BIN=$(ls -t target/debug/deps/zlibc-* | grep -v '\.' | head -1)
-          for i in $(seq 1 40); do
-            echo "=== iter $i ==="
-            timeout 60 gdb -batch -ex 'set confirm off' -ex run -ex 'thread apply all bt 10' -ex 'info registers rip rsp' --args "$BIN" thread:: errno::tests::errno_is_per_thread validation:: --test-threads=1 --nocapture > /tmp/gdbiter.txt 2>&1 || true
-            if grep -aq 'SIGSEGV' /tmp/gdbiter.txt; then echo "CAUGHT on iter $i"; tail -45 /tmp/gdbiter.txt; break; fi
-          done
       # Wave 5 gate packet 1: a real binary on zlibc only (our `_start`,
       # no host libc). The hello crate builds itself (abort + nostdlib);
       # this step asserts the exact bytes and the exit status.
