@@ -190,27 +190,25 @@ unsafe fn thread_exit(td: *mut Thread, res: *mut c_void) -> ! {
         };
         if st == DT_JOINABLE {
             super::synccall::unregister_thread(td); // C3: unlink before DT_EXITED wakes join.
-            unsafe {
-                core::arch::asm!(
-                    "mov dword ptr [{td} + {off}], {exited}",
-                    "lea rdi, [{td} + {off}]",
-                    "mov esi, {op}",
-                    "mov edx, 1",
-                    "mov eax, {sys}",
-                    "syscall",
-                    "xor edi, edi",
-                    "mov eax, {esys}",
-                    "syscall",
-                    "ud2",
-                    td = in(reg) td,
-                    off = const DETACH_OFF,
-                    exited = const DT_EXITED,
-                    op = const { crate::futex::FUTEX_WAKE | crate::futex::FUTEX_PRIVATE },
-                    sys = const crate::futex::SYS_FUTEX,
-                    esys = const SYS_EXIT,
-                    options(noreturn),
-                );
-            }
+            core::arch::asm!(
+                "mov dword ptr [{td} + {off}], {exited}",
+                "lea rdi, [{td} + {off}]",
+                "mov esi, {op}",
+                "mov edx, 1",
+                "mov eax, {sys}",
+                "syscall",
+                "xor edi, edi",
+                "mov eax, {esys}",
+                "syscall",
+                "ud2",
+                td = in(reg) td,
+                off = const DETACH_OFF,
+                exited = const DT_EXITED,
+                op = const { crate::futex::FUTEX_WAKE | crate::futex::FUTEX_PRIVATE },
+                sys = const crate::futex::SYS_FUTEX,
+                esys = const SYS_EXIT,
+                options(noreturn),
+            );
         } else {
             // C3: unlink before __unmapself frees us.
             super::synccall::unregister_thread(td);
