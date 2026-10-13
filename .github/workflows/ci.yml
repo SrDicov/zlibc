@@ -41,10 +41,9 @@ jobs:
       # tests. Parallel cargo threads would interleave that global state.
       # The errno test clones a real thread, so it rides along here.
       # So does the D5 validation test (threads + malloc + stdio).
-      - name: Test thread (serial)
-        run: 'timeout 120 cargo test --verbose -- thread:: errno::tests::errno_is_per_thread validation:: --test-threads=1'
       # DIAG ONLY core-dump trap (revert): loop the serial filter with
-      # cores enabled; on crash, backtrace the core (no gdb repro needed).
+      # cores enabled; on crash, resolve the dead stack words to symbols
+      # (x/a) plus full regs — identifies the hijacked branch.
       - name: DIAG core trap serial flake
         if: always()
         run: |
@@ -59,7 +58,7 @@ jobs:
           echo "--- loop tail ---"
           tail -6 /tmp/serialloop.txt
           CORE=$(ls -t /tmp/zlibc-core-* ./core* 2>/dev/null | head -1)
-          if [ -n "$CORE" ]; then echo "CORE: $CORE"; gdb -batch -ex 'info proc mappings' -ex 'thread apply all bt full 5' -ex 'x/32gx $rsp' -ex 'info registers rip rsp' "$BIN" "$CORE" | tail -70; else echo "no core captured"; fi
+          if [ -n "$CORE" ]; then echo "CORE: $CORE"; gdb -batch -ex 'thread apply all bt full 3' -ex 'x/96a $rsp' -ex 'info registers' "$BIN" "$CORE" | tail -80; else echo "no core captured"; fi
       # Wave 5 gate packet 1: a real binary on zlibc only (our `_start`,
       # no host libc). The hello crate builds itself (abort + nostdlib);
       # this step asserts the exact bytes and the exit status.
