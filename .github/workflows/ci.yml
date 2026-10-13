@@ -26,7 +26,10 @@ jobs:
         run: cargo fmt --check
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        # --lib --tests (not --all-targets): the hello example needs
+        # panic=abort, which only its own build step sets; unwinding
+        # without std has no personality lang item on stable.
+        run: cargo clippy --lib --tests -- -D warnings
 
       - name: Build (host)
         run: cargo build --verbose
