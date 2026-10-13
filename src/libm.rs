@@ -22,9 +22,7 @@ pub extern "C" fn fabsf(x: f32) -> f32 {
 #[inline]
 #[no_mangle]
 pub extern "C" fn copysign(x: f64, y: f64) -> f64 {
-    f64::from_bits(
-        (x.to_bits() & !0x8000_0000_0000_0000) | (y.to_bits() & 0x8000_0000_0000_0000),
-    )
+    f64::from_bits((x.to_bits() & !0x8000_0000_0000_0000) | (y.to_bits() & 0x8000_0000_0000_0000))
 }
 
 /// `copysign` for `f32`.
