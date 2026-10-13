@@ -309,13 +309,14 @@ mod tests {
 
     /// Hand-computed x86_64 layout: head 48, tid+detach 8, errno+pad 8,
     /// then 8 pointer/word fields (64), magic 8; attr is 7 words (56);
-    /// TLS block for zero modules is 16 (DTV head) + 136, 16-aligned.
+    /// TLS block for zero modules is 16 (DTV head) + 136 = 152, rounded
+    /// up to 160 for 16-alignment.
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn thread_layout_matches_hand_computation() {
         assert_eq!(offset_of!(Thread, head), 0);
         assert_eq!(size_of::<Thread>(), 136);
         assert_eq!(size_of::<AttrT>(), 56);
-        assert_eq!(current_tls_size(), 152);
+        assert_eq!(current_tls_size(), 160);
     }
 }
