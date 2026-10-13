@@ -99,7 +99,12 @@ fn hello_threads_malloc_stdio_interoperate() {
             0
         );
         assert_eq!(
-            __pthread_create(&mut t1, null_mut(), Some(hello_child), base.add(2) as *mut c_void),
+            __pthread_create(
+                &mut t1,
+                null_mut(),
+                Some(hello_child),
+                base.add(2) as *mut c_void
+            ),
             0
         );
         assert_eq!(__pthread_join(t0, null_mut()), 0);
