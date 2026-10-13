@@ -518,6 +518,7 @@ mod tests {
     /// hides our signal. std::fs exists in tests; pure parsing.
     fn sig_state() -> (bool, u64, u64, u64) {
         use crate::syscall::syscall0;
+        use std::string::ToString;
         let tid = unsafe { syscall0(186) };
         let mut live = false;
         if let Ok(rd) = std::fs::read_dir("/proc/self/task") {
