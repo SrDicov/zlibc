@@ -413,10 +413,7 @@ pub unsafe extern "C" fn realloc(p: *mut c_void, n: usize) -> *mut c_void {
 #[no_mangle]
 pub unsafe extern "C" fn aligned_alloc(alignment: usize, size: usize) -> *mut c_void {
     unsafe {
-        if alignment == 0
-            || alignment & (alignment - 1) != 0
-            || size % alignment != 0
-        {
+        if alignment == 0 || alignment & (alignment - 1) != 0 || size % alignment != 0 {
             set_err(EINVAL);
             return null_mut();
         }
@@ -447,7 +444,11 @@ pub unsafe extern "C" fn posix_memalign(
         }
         let p = aligned_body(alignment.max(16), size);
         *memptr = p;
-        if p.is_null() { ENOMEM } else { 0 }
+        if p.is_null() {
+            ENOMEM
+        } else {
+            0
+        }
     }
 }
 
