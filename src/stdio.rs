@@ -975,7 +975,11 @@ unsafe fn convert(out: &mut Out, sp: &Spec, ap: &mut Ap) {
                 );
             }
             b'u' => {
-                let uval = if sp.wide == 1 { ap.gp() } else { ap.gp() & 0xffff_ffff };
+                let uval = if sp.wide == 1 {
+                    ap.gp()
+                } else {
+                    ap.gp() & 0xffff_ffff
+                };
                 int_emit(
                     out,
                     &Num {
@@ -990,7 +994,11 @@ unsafe fn convert(out: &mut Out, sp: &Spec, ap: &mut Ap) {
                 );
             }
             b'o' => {
-                let uval = if sp.wide == 1 { ap.gp() } else { ap.gp() & 0xffff_ffff };
+                let uval = if sp.wide == 1 {
+                    ap.gp()
+                } else {
+                    ap.gp() & 0xffff_ffff
+                };
                 int_emit(
                     out,
                     &Num {
@@ -1064,8 +1072,10 @@ unsafe fn convert(out: &mut Out, sp: &Spec, ap: &mut Ap) {
             _ => {
                 // Floats (`f e g a`, upper too): consume, emit nothing.
                 // `L` is the 16-byte SysV MEMORY class, the rest XMM slots.
-                if matches!(sp.spec, b'f' | b'F' | b'e' | b'E' | b'g' | b'G' | b'a' | b'A')
-                {
+                if matches!(
+                    sp.spec,
+                    b'f' | b'F' | b'e' | b'E' | b'g' | b'G' | b'a' | b'A'
+                ) {
                     if sp.wide == 2 {
                         ap.stk16();
                     } else {
