@@ -588,7 +588,11 @@ mod tests {
                 core::hint::spin_loop();
                 spins += 1;
             }
-            assert_eq!(HOST_HIT.load(Ordering::SeqCst), 1, "host cannot deliver signals here");
+            assert_eq!(
+                HOST_HIT.load(Ordering::SeqCst),
+                1,
+                "host cannot deliver signals here"
+            );
         }
     }
 
