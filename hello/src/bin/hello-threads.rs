@@ -51,13 +51,21 @@ pub extern "C" fn main(_argc: c_int, _argv: *mut *mut c_char, _envp: *mut *mut c
         let mut lo1 = 50 as c_int;
         let mut t0: PthreadT = null_mut();
         let mut t1: PthreadT = null_mut();
-        if __pthread_create(&mut t0, null_mut(), Some(worker), &mut lo0 as *mut c_int as *mut c_void)
-            != 0
+        if __pthread_create(
+            &mut t0,
+            null_mut(),
+            Some(worker),
+            &mut lo0 as *mut c_int as *mut c_void,
+        ) != 0
         {
             return 1;
         }
-        if __pthread_create(&mut t1, null_mut(), Some(worker), &mut lo1 as *mut c_int as *mut c_void)
-            != 0
+        if __pthread_create(
+            &mut t1,
+            null_mut(),
+            Some(worker),
+            &mut lo1 as *mut c_int as *mut c_void,
+        ) != 0
         {
             return 1;
         }
@@ -67,8 +75,14 @@ pub extern "C" fn main(_argc: c_int, _argv: *mut *mut c_char, _envp: *mut *mut c
         if __pthread_join(t1, null_mut()) != 0 {
             return 1;
         }
-        let total = PART0.load(Ordering::SeqCst).wrapping_add(PART1.load(Ordering::SeqCst));
+        let total = PART0
+            .load(Ordering::SeqCst)
+            .wrapping_add(PART1.load(Ordering::SeqCst));
         printf(c"threads total %d\n".as_ptr(), total as c_int);
-        if total == 4950 { 0 } else { 1 }
+        if total == 4950 {
+            0
+        } else {
+            1
+        }
     }
 }
