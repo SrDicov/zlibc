@@ -17,7 +17,9 @@ use core::ffi::{c_char, c_int};
 /// error instead of a silent abort.
 #[no_mangle]
 pub extern "C" fn rust_eh_personality() -> ! {
-    loop {}
+    loop {
+        core::hint::spin_loop();
+    }
 }
 
 /// Application entry for our `_start_c` (exact signature it calls).
