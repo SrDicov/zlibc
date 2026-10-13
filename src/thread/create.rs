@@ -911,7 +911,6 @@ mod tests {
         out: 0,
         me: 0,
     }; 4];
-    static FLAG: AtomicU32 = AtomicU32::new(0);
 
     /// Child code: pure GPR/atomics only. Must not touch host TLS (its
     /// `FS` is our TCB) and must not panic (see [`raw_clone`]).
@@ -930,9 +929,17 @@ mod tests {
         }
     }
 
-    /// Child code for the detached test: report, then die detached.
-    unsafe extern "C" fn flag_routine(_arg: *mut c_void) -> *mut c_void {
-        FLAG.store(1, Ordering::SeqCst);
+    static DT_GO: AtomicU32 = AtomicU32::new(0);
+
+    /// Child code for the detach test: spin until released, then die.
+    /// Spinning (never early-exiting) is load-bearing: both detaches
+    /// below must observe a live thread, or the second one would touch
+    /// memory the first already freed (join+unmap of a dead joinable is
+    /// silent, the rerun use-after-free is a nondeterministic SIGSEGV).
+    unsafe extern "C" fn spin_release(_arg: *mut c_void) -> *mut c_void {
+        while DT_GO.load(Ordering::SeqCst) == 0 {
+            core::hint::spin_loop();
+        }
         null_mut()
     }
 
@@ -977,26 +984,24 @@ mod tests {
                 outs[k] = (*s).out;
                 k += 1;
             }
-            FLAG.store(0, Ordering::SeqCst);
         }
+        DT_GO.store(0, Ordering::SeqCst);
         let mut attr = AttrT::default();
         let mut dt: PthreadT = null_mut();
-        // Joinable at birth: detach once (0), detach again (EINVAL),
-        // then the detached death runs flag_routine via __unmapself.
+        // Detach-twice on a GUARANTEED-live thread: it spins until we
+        // release it, so detach once reports 0 and detach again EINVAL,
+        // deterministically. Releasing it lets it die detached (the
+        // __unmapself path runs); dt is never touched afterwards.
         let (detach_rc, detach_again) = unsafe {
             if __pthread_attr_init(&mut attr) == 0
-                && __pthread_create(&mut dt, &attr, Some(flag_routine), null_mut()) == 0
+                && __pthread_create(&mut dt, &attr, Some(spin_release), null_mut()) == 0
             {
                 (__pthread_detach(dt), __pthread_detach(dt))
             } else {
                 (-1, -1)
             }
         };
-        if detach_rc == 0 {
-            while FLAG.load(Ordering::SeqCst) == 0 {
-                core::hint::spin_loop();
-            }
-        }
+        DT_GO.store(1, Ordering::SeqCst);
         restore_fs(host_fs);
         // Now safe to assert (host TLS intact).
         assert!(!me.is_null());
@@ -1016,6 +1021,5 @@ mod tests {
         assert_eq!(total, (N as u64) * PER * ((N as u64) * PER - 1) / 2);
         assert_eq!(detach_rc, 0);
         assert_eq!(detach_again, EINVAL);
-        assert_eq!(FLAG.load(Ordering::SeqCst), 1);
     }
 }
