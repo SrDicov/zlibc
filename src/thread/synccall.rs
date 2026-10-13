@@ -567,6 +567,13 @@ mod tests {
     #[allow(function_casts_as_integer)]
     fn signal_delivery_runs_handler() {
         use crate::syscall::{syscall0, syscall2, syscall4};
+        extern "C" {
+            fn gettid() -> i32;
+        }
+        // Anchor: our raw gettid must agree with the host libc's.
+        let mine = unsafe { syscall0(SYS_GETTID) };
+        let theirs = unsafe { gettid() } as isize;
+        assert_eq!(mine, theirs, "raw syscall0(gettid) disagrees with libc");
         const SIG_PROBE: c_int = 35; // SIGRTMIN+3, unused anywhere else
         const SYS_GETTID: usize = 186; // TODO: share with sync.rs
         unsafe {
