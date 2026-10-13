@@ -279,6 +279,14 @@ pub(crate) unsafe fn unregister_thread(td: *mut Thread) {
 /// never call directly.
 unsafe extern "C" fn synccall_handler(_sig: c_int) {
     unsafe {
+        // DIAG ONLY (revert): prove handler entry with one raw byte.
+        static DIAG_H: u8 = b'H';
+        let _ = crate::syscall::syscall3(
+            crate::syscall::SYS_WRITE,
+            2,
+            core::ptr::addr_of!(DIAG_H) as usize,
+            1,
+        );
         // Not our catch (stray signal, or the wave already moved on): do
         // nothing. A null TP (boot, no thread yet) also bails — it must
         // never be dereferenced.
