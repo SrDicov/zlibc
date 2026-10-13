@@ -67,9 +67,7 @@ pub unsafe extern "C" fn socket(domain: c_int, stype: c_int, protocol: c_int) ->
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
 pub unsafe extern "C" fn bind(fd: c_int, addr: *const c_void, len: u32) -> c_int {
-    unsafe {
-        syscall_ret(syscall3(SYS_BIND, fd as usize, addr as usize, len as usize)) as c_int
-    }
+    unsafe { syscall_ret(syscall3(SYS_BIND, fd as usize, addr as usize, len as usize)) as c_int }
 }
 
 /// Initiate a connection (musl `connect`).
@@ -81,7 +79,12 @@ pub unsafe extern "C" fn bind(fd: c_int, addr: *const c_void, len: u32) -> c_int
 #[no_mangle]
 pub unsafe extern "C" fn connect(fd: c_int, addr: *const c_void, len: u32) -> c_int {
     unsafe {
-        syscall_ret(syscall3(SYS_CONNECT, fd as usize, addr as usize, len as usize)) as c_int
+        syscall_ret(syscall3(
+            SYS_CONNECT,
+            fd as usize,
+            addr as usize,
+            len as usize,
+        )) as c_int
     }
 }
 
@@ -105,7 +108,12 @@ pub unsafe extern "C" fn listen(fd: c_int, backlog: c_int) -> c_int {
 #[no_mangle]
 pub unsafe extern "C" fn accept(fd: c_int, addr: *mut c_void, len: *mut u32) -> c_int {
     unsafe {
-        syscall_ret(syscall3(SYS_ACCEPT, fd as usize, addr as usize, len as usize)) as c_int
+        syscall_ret(syscall3(
+            SYS_ACCEPT,
+            fd as usize,
+            addr as usize,
+            len as usize,
+        )) as c_int
     }
 }
 
@@ -183,7 +191,12 @@ pub unsafe extern "C" fn shutdown(fd: c_int, how: c_int) -> c_int {
 /// `fds` must hold two writable ints.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
-pub unsafe extern "C" fn socketpair(domain: c_int, stype: c_int, protocol: c_int, fds: *mut c_int) -> c_int {
+pub unsafe extern "C" fn socketpair(
+    domain: c_int,
+    stype: c_int,
+    protocol: c_int,
+    fds: *mut c_int,
+) -> c_int {
     unsafe {
         syscall_ret(syscall4(
             SYS_SOCKETPAIR,
@@ -258,7 +271,12 @@ pub unsafe extern "C" fn getsockopt(
 #[no_mangle]
 pub unsafe extern "C" fn getsockname(fd: c_int, addr: *mut c_void, len: *mut u32) -> c_int {
     unsafe {
-        syscall_ret(syscall3(SYS_GETSOCKNAME, fd as usize, addr as usize, len as usize)) as c_int
+        syscall_ret(syscall3(
+            SYS_GETSOCKNAME,
+            fd as usize,
+            addr as usize,
+            len as usize,
+        )) as c_int
     }
 }
 
@@ -271,7 +289,12 @@ pub unsafe extern "C" fn getsockname(fd: c_int, addr: *mut c_void, len: *mut u32
 #[no_mangle]
 pub unsafe extern "C" fn getpeername(fd: c_int, addr: *mut c_void, len: *mut u32) -> c_int {
     unsafe {
-        syscall_ret(syscall3(SYS_GETPEERNAME, fd as usize, addr as usize, len as usize)) as c_int
+        syscall_ret(syscall3(
+            SYS_GETPEERNAME,
+            fd as usize,
+            addr as usize,
+            len as usize,
+        )) as c_int
     }
 }
 
@@ -295,18 +318,29 @@ mod tests {
     fn socketpair_send_recv_roundtrip() {
         unsafe {
             let mut fds = [0 as c_int; 2];
-            assert_eq!(
-                socketpair(AF_UNIX, SOCK_STREAM, 0, fds.as_mut_ptr()),
-                0
-            );
+            assert_eq!(socketpair(AF_UNIX, SOCK_STREAM, 0, fds.as_mut_ptr()), 0);
             let msg = b"ping";
             assert_eq!(
-                sendto(fds[1], msg.as_ptr() as *const c_void, msg.len(), 0, core::ptr::null(), 0),
+                sendto(
+                    fds[1],
+                    msg.as_ptr() as *const c_void,
+                    msg.len(),
+                    0,
+                    core::ptr::null(),
+                    0
+                ),
                 msg.len() as isize
             );
             let mut back = [0u8; 8];
             assert_eq!(
-                recvfrom(fds[0], back.as_mut_ptr() as *mut c_void, back.len(), 0, core::ptr::null_mut(), core::ptr::null_mut()),
+                recvfrom(
+                    fds[0],
+                    back.as_mut_ptr() as *mut c_void,
+                    back.len(),
+                    0,
+                    core::ptr::null_mut(),
+                    core::ptr::null_mut()
+                ),
                 msg.len() as isize
             );
             assert_eq!(&back[..msg.len()], msg);
