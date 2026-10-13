@@ -41,3 +41,11 @@ jobs:
       # tests. Parallel cargo threads would interleave that global state.
       - name: Test thread (serial)
         run: 'cargo test --verbose -- thread:: --test-threads=1'
+      # DIAG ONLY segv hunt (revert): backtrace the parallel-step death.
+      - name: DIAG gdb parallel segv
+        if: always()
+        run: |
+          sudo apt-get install -y gdb
+          cargo test --no-run --verbose
+          BIN=$(ls -t target/debug/deps/zlibc-* | grep -v '\.' | head -1)
+          timeout 120 gdb -batch -ex 'set confirm off' -ex run -ex 'thread apply all bt 8' -ex 'info registers rip rsp rdi rsi fs_base' -ex 'x/gx $fs_base+128' --args "$BIN" --skip thread:: --test-threads=8 --nocapture | tail -60
