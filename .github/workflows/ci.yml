@@ -35,9 +35,9 @@ jobs:
         run: cargo build --verbose --target x86_64-unknown-linux-musl
 
       - name: Test (non-thread, parallel)
-        run: cargo test --verbose -- --skip thread::
+        run: 'cargo test --verbose -- --skip thread::'
       # Thread tests touch per-thread CPU state (FS) and process-global
       # signal dispositions/registry: serial by design, like musl's own
       # tests. Parallel cargo threads would interleave that global state.
       - name: Test thread (serial)
-        run: cargo test --verbose -- thread:: --test-threads=1
+        run: 'cargo test --verbose -- thread:: --test-threads=1'
