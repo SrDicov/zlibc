@@ -16,6 +16,9 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use zlibc::abi::PthreadT;
 use zlibc::thread::create::{__pthread_create, __pthread_join};
 
+#[path = "../personality.rs"]
+mod personality;
+
 extern "C" {
     fn printf(fmt: *const c_char, ...) -> c_int;
 }
