@@ -61,28 +61,44 @@ pub extern "C" fn truncf(x: f32) -> f32 {
 #[no_mangle]
 pub extern "C" fn floor(x: f64) -> f64 {
     let t = trunc(x);
-    if x < 0.0 && t != x { t - 1.0 } else { t }
+    if x < 0.0 && t != x {
+        t - 1.0
+    } else {
+        t
+    }
 }
 
 /// `floor` for `f32`.
 #[no_mangle]
 pub extern "C" fn floorf(x: f32) -> f32 {
     let t = truncf(x);
-    if x < 0.0 && t != x { t - 1.0 } else { t }
+    if x < 0.0 && t != x {
+        t - 1.0
+    } else {
+        t
+    }
 }
 
 /// Round up, via [`trunc`] (musl `ceil`, mirrored).
 #[no_mangle]
 pub extern "C" fn ceil(x: f64) -> f64 {
     let t = trunc(x);
-    if x > 0.0 && t != x { t + 1.0 } else { t }
+    if x > 0.0 && t != x {
+        t + 1.0
+    } else {
+        t
+    }
 }
 
 /// `ceil` for `f32`.
 #[no_mangle]
 pub extern "C" fn ceilf(x: f32) -> f32 {
     let t = truncf(x);
-    if x > 0.0 && t != x { t + 1.0 } else { t }
+    if x > 0.0 && t != x {
+        t + 1.0
+    } else {
+        t
+    }
 }
 
 /// Round half away from zero (musl `round`).
@@ -109,7 +125,9 @@ pub extern "C" fn roundf(x: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{ceil, ceilf, copysign, copysignf, fabs, fabsf, floor, floorf, round, roundf, trunc, truncf};
+    use super::{
+        ceil, ceilf, copysign, copysignf, fabs, fabsf, floor, floorf, round, roundf, trunc, truncf,
+    };
 
     #[test]
     fn fabs_is_sign_clear() {
