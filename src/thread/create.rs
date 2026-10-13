@@ -320,8 +320,9 @@ pub unsafe extern "C" fn __pthread_create(
             if detached { DT_DETACHED } else { DT_JOINABLE },
             Ordering::SeqCst,
         );
-        // Slot reserved; `errno.rs` still serves one global cell (module docs).
+        // Per-thread errno cell, claimed by `errno.rs` via the magic.
         (*td).errno_val = 0;
+        (*td).magic = super::THREAD_MAGIC;
         (*td).map_base = base;
         (*td).map_size = size;
         let top = td as usize;

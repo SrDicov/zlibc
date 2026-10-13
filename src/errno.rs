@@ -1,41 +1,78 @@
-//! Process-global `errno` cell and `__errno_location`.
+//! Per-thread `errno` cell through the thread pointer, musl-style.
 //!
 //! Mirrors musl `src/errno/__errno_location.c` (`int *__errno_location`,
 //! plus the `weak_alias(__errno_location, ___errno_location)` which lives
-//! in `crate::symbols`).
+//! in `crate::symbols`): musl reads the cell through the thread pointer,
+//! giving each thread its own `errno`.
 //!
-//! shortcut(single-threaded errno): musl reads the cell through the
-//! thread pointer, giving each thread its own `errno`. With no threads
-//! and no TP yet, one process-global cell is observationally identical.
-//! Upgrade to true TLS in Wave 3 when the TP exists (stable
-//! `#[thread_local]` is unavailable: rustc E0658).
+//! x86_64: `FS` is fetched with `arch_prctl(ARCH_GET_FS)` (one syscall,
+//! error paths only — shortcut vs a raw `%fs` base read, which needs
+//! `rdfsbase` and is not portable). When `FS` points at our [`Thread`]
+//! (magic matches), its `errno_val` is served; otherwise the
+//! process-global fallback is served, so foreign threads (host std under
+//! `cargo test`, or pre-TLS boot) keep a working `errno`.
 //!
-//! # Safety
-//!
-//! The cell has no synchronization; like musl's contract, each thread
-//! must use only its own cell once threads exist.
+//! [`Thread`]: crate::thread::Thread
 
 use core::cell::UnsafeCell;
 use core::ffi::c_int;
+use core::mem::offset_of;
 
 struct ErrnoCell(UnsafeCell<c_int>);
 
-/// `Sync` for the cell. Sound only while single-threaded (see module
-/// docs); Wave 3 deletes this with the TLS upgrade.
-// SAFETY: no thread exists yet that could race on the cell.
+/// `Sync` for the fallback cell: it is only shared by foreign threads,
+/// each of which uses it through an atomic-free but race-tolerant path —
+/// same exposure as musl's single-threaded `errno` before threads exist.
+/// Own threads never touch it (they own their cell).
+// SAFETY: foreign threads may race on it exactly like a pre-thread errno.
 unsafe impl Sync for ErrnoCell {}
 
 static ERRNO: ErrnoCell = ErrnoCell(UnsafeCell::new(0));
 
-/// Pointer to the `errno` cell.
+fn global_errno() -> *mut c_int {
+    ERRNO.0.get()
+}
+
+/// Pointer to the calling thread's `errno` cell.
 ///
 /// # Safety
 ///
-/// The pointer is valid for the program's lifetime. Until Wave 3 lands
-/// thread-local storage, all threads share this one cell.
+/// The pointer is valid for the program's lifetime. Own threads get
+/// their private cell; foreign threads share the fallback. Reading 8
+/// bytes at `FS + magic_offset` on a foreign thread only touches mapped
+/// TCB memory (never faults); a 2^-64 magic collision would merely
+/// alias one access, never corrupt control state.
 #[no_mangle]
 pub unsafe extern "C" fn __errno_location() -> *mut c_int {
-    ERRNO.0.get()
+    #[cfg(target_arch = "x86_64")]
+    {
+        let mut base: usize = 0;
+        let r = unsafe {
+            crate::syscall::syscall2(
+                crate::thread::SYS_ARCH_PRCTL,
+                crate::thread::ARCH_GET_FS,
+                core::ptr::addr_of_mut!(base) as usize,
+            )
+        };
+        if r == 0 && base != 0 {
+            let tp = base as *const u8;
+            let magic = unsafe {
+                tp.add(offset_of!(crate::thread::Thread, magic))
+                    .cast::<u64>()
+                    .read()
+            };
+            if magic == crate::thread::THREAD_MAGIC {
+                return unsafe {
+                    (base as *mut u8)
+                        .add(offset_of!(crate::thread::Thread, errno_val))
+                        .cast::<c_int>()
+                };
+            }
+        }
+        global_errno()
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    global_errno()
 }
 
 // NOTE: musl defines `___errno_location` as a WEAK alias of
@@ -43,7 +80,8 @@ pub unsafe extern "C" fn __errno_location() -> *mut c_int {
 // externally-defined target leaves no linkable weak record with this
 // toolchain's assembler (proven by link failure in CI), so the alias is
 // a plain forwarding definition instead. Observable contract is
-// identical today (one shared cell); revisit when real linking lands.
+// identical (per-thread cell with global fallback); revisit when real
+// linking lands.
 ///
 /// # Safety
 ///
@@ -51,4 +89,58 @@ pub unsafe extern "C" fn __errno_location() -> *mut c_int {
 #[no_mangle]
 pub unsafe extern "C" fn ___errno_location() -> *mut c_int {
     unsafe { __errno_location() }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::ffi::c_void;
+    use core::ptr::null_mut;
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    use crate::abi::PthreadT;
+    use crate::thread::create::{__pthread_create, __pthread_join};
+
+    static CHILD_CELL: AtomicUsize = AtomicUsize::new(0);
+    static CHILD_SAW: AtomicUsize = AtomicUsize::new(0);
+
+    /// Child code: pure cell access only. Must not touch host TLS (its
+    /// `FS` is our TCB) and must not assert (see `raw_clone` discipline).
+    unsafe extern "C" fn errno_child(_arg: *mut c_void) -> *mut c_void {
+        unsafe {
+            let p = super::__errno_location();
+            CHILD_CELL.store(p as usize, Ordering::SeqCst);
+            *p = 7;
+            CHILD_SAW.store(*p as usize, Ordering::SeqCst);
+        }
+        null_mut()
+    }
+
+    /// Own threads get private cells; foreign (host) threads share the
+    /// global fallback. Runs in the serial thread-test step (touches
+    /// clone + FS-guarded state, like its neighbours).
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn errno_is_per_thread_with_global_fallback() {
+        // Harness thread is foreign (glibc owns its FS): global cell.
+        let mine = unsafe { super::__errno_location() };
+        assert!(!mine.is_null());
+        unsafe {
+            *mine = 0;
+        }
+        // A fresh host thread never ran our clone path: same global cell.
+        let host_cell = std::thread::spawn(|| unsafe { super::__errno_location() } as usize)
+            .join()
+            .unwrap();
+        assert_eq!(host_cell, mine as usize);
+        // Our clone()d thread: a different cell, value contained.
+        CHILD_CELL.store(0, Ordering::SeqCst);
+        CHILD_SAW.store(0, Ordering::SeqCst);
+        let mut td: PthreadT = null_mut();
+        let rc = unsafe { __pthread_create(&mut td, null_mut(), Some(errno_child), null_mut()) };
+        assert_eq!(rc, 0);
+        assert_eq!(unsafe { __pthread_join(td, null_mut()) }, 0);
+        assert_eq!(CHILD_SAW.load(Ordering::SeqCst), 7);
+        assert_ne!(CHILD_CELL.load(Ordering::SeqCst), mine as usize);
+        assert_eq!(unsafe { *mine }, 0);
+    }
 }

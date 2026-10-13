@@ -28,7 +28,6 @@
 //! OUT (later waves, each a `shortcut:` at its site): cancel points,
 //! `pthread_exit`/`pthread_cancel`, keys/`tsd`, atfork handlers,
 //! barriers, robust list, signals around create, global thread list,
-//! per-thread `errno` (slot reserved, `errno.rs` still global),
 //! user-provided stacks, explicit scheduling.
 
 pub mod create;
@@ -58,8 +57,7 @@ pub(crate) const SYS_SET_TID_ADDRESS: usize = 218; // TODO: generate from arch b
 /// musl `src/thread/x86_64/__set_thread_area.s:8` (`ARCH_SET_FS`).
 #[cfg(target_arch = "x86_64")]
 pub(crate) const ARCH_SET_FS: usize = 0x1002;
-/// `ARCH_GET_FS` pair (test save/restore only; same `asm/prctl.h` family).
-#[cfg(test)]
+/// `ARCH_GET_FS` pair (errno fallback probe + test save/restore; same `asm/prctl.h` family).
 #[cfg(target_arch = "x86_64")]
 pub(crate) const ARCH_GET_FS: usize = 0x1003;
 
@@ -104,6 +102,13 @@ pub(crate) const EAGAIN: c_int = 11; // errno.h:11
 pub(crate) const EINVAL: c_int = 22; // errno.h:22
 pub(crate) const ENOTSUP: c_int = 95; // errno.h:96 (`ENOTSUP=EOPNOTSUPP`)
 
+/// Magic stamp proving an `FS` base is our [`Thread`] (x86_64).
+/// `errno.rs` reads `FS` on every call, including on foreign threads
+/// (host std under `cargo test`); the magic tells ours apart from a
+/// glibc TCB, whose bytes at these offsets are arbitrary. ASCII
+/// "ZLIBTHRD", little-endian.
+#[cfg(target_arch = "x86_64")]
+pub(crate) const THREAD_MAGIC: u64 = 0x5a4c_4942_5448_4452;
 // ---- Detach states (musl src/internal/pthread_impl.h:70-75) ------------------
 pub(crate) const DT_EXITED: c_int = 0;
 pub(crate) const DT_EXITING: c_int = 1;
@@ -217,6 +222,10 @@ pub struct Thread {
     pub start: StartFn,
     /// Opaque argument forwarded to `start`.
     pub arg: *mut c_void,
+    /// Magic stamp ([`THREAD_MAGIC`], x86_64): set at creation, proving
+    /// this is our TCB to `errno.rs`. Appended last so every earlier
+    /// offset (tid, detach word, errno cell) never moves.
+    pub magic: u64,
     // Deliberately absent (all OUT, see module docs): cancel state,
     // cancel buffer, tsd/keys, robust list, locale, killlock, timer id,
     // stdio locks, dlerror buffer. Each returns with its owning wave.
@@ -299,14 +308,15 @@ mod tests {
     use core::mem::{offset_of, size_of};
 
     /// Hand-computed x86_64 layout: head 48, tid+detach 8, errno+pad 8,
-    /// then 8 pointer/word fields (64); attr is 7 words (56); TLS block
-    /// for zero modules is 16 (DTV head) + 128, already 16-aligned.
+    /// then 8 pointer/word fields (64), magic 8; attr is 7 words (56);
+    /// TLS block for zero modules is 16 (DTV head) + 136 = 152, rounded
+    /// up to 160 for 16-alignment.
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn thread_layout_matches_hand_computation() {
         assert_eq!(offset_of!(Thread, head), 0);
-        assert_eq!(size_of::<Thread>(), 128);
+        assert_eq!(size_of::<Thread>(), 136);
         assert_eq!(size_of::<AttrT>(), 56);
-        assert_eq!(current_tls_size(), 144);
+        assert_eq!(current_tls_size(), 160);
     }
 }

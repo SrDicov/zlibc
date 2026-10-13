@@ -327,6 +327,17 @@ vida solo tocan hilos garantizados vivos, o el segundo detach firma un
 use-after-unmap nondeterminista.
 - **Wave 4** — stdio, mallocng, libm, locale/network/misc, validation.
   Gate: hello + pthreads + malloc/stdio running, CI green on `main`.
+  Packets (each one push, green before next): D0 errno per-thread DONE
+  (`THREAD_MAGIC`, 43 tests); D3a `fabs/copysign` DONE; D2 allocator DONE
+  (free-list + aligned doors, whole suite runs on it); D1 stdio DONE
+  (buffered FILE + `printf` via naked `va_start` trampolines — stable has
+  no `va_start`, nightly-only `c_variadic`); D3b directed roundings DONE;
+  D4 locale stubs + socket wrappers DONE; D5 gate DONE (58 tests green:
+  50 + 8 serial). CLOSED (v0.4): hello + pthreads + malloc/stdio running
+  together, CI green on `main`. Known flake (1 in ~8, unreproduced in 7
+  straight runs incl. a ×5 stress): one serial-step SIGSEGV inside the D5
+  test, no output line — shared-heap/trampoline timing suspect, no
+  evidence; do not chase without a backtrace.
 
 ## "100% done" criteria
 
