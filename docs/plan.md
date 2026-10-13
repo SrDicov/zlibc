@@ -313,6 +313,18 @@ src/thread/, already wired).
 ### Wave 3 gate
 N-thread counter + mutex/condvar rendezvous test green, then merge
 `testing → main`, tag `v0.2`.
+
+CLOSED (v0.3): futex + mutex/condvar (opaque mirrors, exact encoding),
+clone/create/join/detach + TLS + unmapself, synccall registry + wave —
+112 probe values, 40 tests green, full suite parallel. Advances: compat
+ABI (1), POSIX hilos (3). Sin debilitar principios (revisión de cierre:
+2/5/6/7/8 intactos; 4: sin bugs musl nuevos, IRELATIVE ya anotado).
+Lecciones caras: (a) `SA_RESTORER` + trampolín real obligatorios — sin
+ellos este kernel acepta `rt_sigaction` pero jamás despacha (ni siquiera
+falla); musl tenía razón y el fallback vDSO no existe aquí; (b) detach
+sobre hilo ya muerto hace join+unmap silencioso — los tests de ciclo de
+vida solo tocan hilos garantizados vivos, o el segundo detach firma un
+use-after-unmap nondeterminista.
 - **Wave 4** — stdio, mallocng, libm, locale/network/misc, validation.
   Gate: hello + pthreads + malloc/stdio running, CI green on `main`.
 
