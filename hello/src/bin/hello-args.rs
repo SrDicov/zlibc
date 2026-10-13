@@ -50,7 +50,10 @@ pub extern "C" fn main(argc: c_int, argv: *mut *mut c_char, envp: *mut *mut c_ch
             printf(c"argv=%s\n".as_ptr(), *argv.offset(i));
             i += 1;
         }
-        printf(c"env=%s\n".as_ptr(), getenv(envp, b"TEST_MARKER".as_ptr(), 11));
+        printf(
+            c"env=%s\n".as_ptr(),
+            getenv(envp, b"TEST_MARKER".as_ptr(), 11),
+        );
         0
     }
 }
