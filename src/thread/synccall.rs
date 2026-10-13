@@ -601,10 +601,12 @@ mod tests {
                 spins += 1;
             }
             let (live, blk, pnd, cgt) = sig_state();
+            #[allow(function_casts_as_integer)]
+            let installed = probe_handler as usize;
             assert_eq!(
                 PROBE_HIT.load(Ordering::SeqCst),
                 1,
-                "handler never ran (live={live} blk={blk:#x} pnd={pnd:#x} cgt={cgt:#x})"
+                "handler never ran (live={live} blk={blk:#x} pnd={pnd:#x} cgt={cgt:#x} installed={installed:#x})"
             );
             // Leave no trace: restore default disposition.
             let dfl = KernelSigaction {
