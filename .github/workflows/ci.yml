@@ -45,6 +45,7 @@ jobs:
       # DIAG ONLY strace the hanging wave (revert): shows the exact
       # trapping syscall instead of theorizing about it.
       - name: DIAG strace synccall wave
+        if: always()
         run: |
           sudo apt-get install -y strace
           cargo test --no-run --verbose
