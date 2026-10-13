@@ -35,10 +35,15 @@ jobs:
         run: cargo build --verbose --target x86_64-unknown-linux-musl
 
       - name: Test (non-thread, parallel)
-        run: 'cargo test --verbose -- --skip thread:: --skip errno::tests::errno_is_per_thread'
+        run: 'timeout 120 cargo test --verbose -- --skip thread:: --skip errno::tests::errno_is_per_thread'
       # Thread tests touch per-thread CPU state (FS) and process-global
       # signal dispositions/registry: serial by design, like musl's own
       # tests. Parallel cargo threads would interleave that global state.
       # The errno test clones a real thread, so it rides along here.
       - name: Test thread (serial)
-        run: 'cargo test --verbose -- thread:: errno::tests::errno_is_per_thread --test-threads=1'
+        run: 'timeout 120 cargo test --verbose -- thread:: errno::tests::errno_is_per_thread --test-threads=1'
+      # DIAG ONLY malloc isolation (revert): malloc tests alone, serial,
+      # bounded. Discriminates allocator-concurrency hang vs deterministic.
+      - name: DIAG malloc alone serial
+        if: always()
+        run: 'timeout 100 cargo test --verbose -- malloc:: --test-threads=1'
