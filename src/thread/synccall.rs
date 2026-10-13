@@ -513,7 +513,7 @@ mod tests {
     /// `as *const ()` — the latter left no `probe_handler` symbol in the
     /// binary (verified with `nm`), so this tests whether the
     /// intermediate pointer cast miscompiles the address away.
-    #[allow(clippy::function_casts_as_integer)]
+    #[allow(function_casts_as_integer)]
     unsafe extern "C" fn probe_handler(_sig: c_int) {
         PROBE_HIT.store(1, Ordering::SeqCst);
     }
