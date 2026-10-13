@@ -52,6 +52,16 @@ const SIG_SETMASK: usize = 2;
 const SIG_IGN: usize = 1;
 const SA_ONSTACK: usize = 0x08000000;
 const SA_RESTART: usize = 0x10000000;
+const SA_RESTORER: usize = 0x04000000;
+
+/// Userspace restorer trampoline (musl always sets `SA_RESTORER` with a
+/// real trampoline — see `__restore_rt` — instead of relying on the
+/// kernel vDSO sigreturn fallback. Matches musl; required here because
+/// restorer-less installs never dispatch on this kernel.
+#[unsafe(naked)]
+pub(crate) unsafe extern "C" fn __restore_rt() {
+    core::arch::naked_asm!("mov rax, 15", "syscall", "ud2")
+}
 
 /// Kernel sigset size for the raw calls (`_NSIG/8`, sigaction.c:54).
 const K_SIGSET_LEN: usize = 8;
@@ -360,11 +370,13 @@ pub unsafe extern "C" fn __synccall(func: Option<SynccallFn>, ctx: *mut c_void) 
         WAVE_FN.store(run as *const () as usize, Ordering::SeqCst);
         WAVE_CTX.store(ctx as usize, Ordering::SeqCst);
 
-        // synccall.c:76-77: catch-all handler mask, restart + onstack.
+        // synccall.c:76-77: catch-all handler mask, restart + onstack,
+        // plus SA_RESTORER with our trampoline (musl-faithful; the vDSO
+        // fallback is not relied upon).
         let wave = KernelSigaction {
             handler: synccall_handler as *const () as usize,
-            flags: SA_ONSTACK | SA_RESTART,
-            restorer: 0,
+            flags: SA_ONSTACK | SA_RESTART | SA_RESTORER,
+            restorer: __restore_rt as *const () as usize,
             mask: !0,
         };
         let _ = syscall4(
@@ -619,8 +631,8 @@ mod tests {
         unsafe {
             let act = KernelSigaction {
                 handler: probe_handler as usize,
-                flags: 0,
-                restorer: 0,
+                flags: SA_RESTORER,
+                restorer: __restore_rt as usize,
                 mask: 0,
             };
             let r = syscall4(
