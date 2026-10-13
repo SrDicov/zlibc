@@ -35,10 +35,10 @@ jobs:
         run: cargo build --verbose --target x86_64-unknown-linux-musl
 
       - name: Test (runs build.rs ABI probe + asserts + unit tests)
-        run: timeout 100 cargo test --verbose -- --skip thread::
+        run: 'timeout 100 cargo test --verbose -- --skip thread::'
       # DIAG ONLY (revert): bisect the thread-test hang/crash in isolation,
       # each bounded so a hang fails fast instead of burning hours.
       - name: Test thread create only
-        run: timeout 100 cargo test --verbose -- thread::create:: --test-threads=1
+        run: 'timeout 100 cargo test --verbose -- thread::create:: --test-threads=1'
       - name: Test synccall only
-        run: timeout 100 cargo test --verbose -- thread::synccall --test-threads=1
+        run: 'timeout 100 cargo test --verbose -- thread::synccall --test-threads=1'
