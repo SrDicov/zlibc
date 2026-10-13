@@ -513,7 +513,6 @@ mod tests {
     /// `as *const ()` — the latter left no `probe_handler` symbol in the
     /// binary (verified with `nm`), so this tests whether the
     /// intermediate pointer cast miscompiles the address away.
-    #[allow(function_casts_as_integer)]
     unsafe extern "C" fn probe_handler(_sig: c_int) {
         PROBE_HIT.store(1, Ordering::SeqCst);
     }
@@ -565,6 +564,7 @@ mod tests {
     /// wave protocol, not delivery.
     #[cfg(target_arch = "x86_64")]
     #[test]
+    #[allow(function_casts_as_integer)]
     fn signal_delivery_runs_handler() {
         use crate::syscall::{syscall0, syscall2, syscall4};
         const SIG_PROBE: c_int = 35; // SIGRTMIN+3, unused anywhere else
