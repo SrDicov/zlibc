@@ -512,13 +512,21 @@ mod tests {
         PROBE_HIT.store(1, Ordering::SeqCst);
     }
 
-    /// Ground truth from the kernel: (blocked, pending, caught) masks
-    /// for the CALLING thread (task view — the process view aliases the
-    /// main thread and lies about workers). std::fs exists in tests;
-    /// pure parsing, no unsafe.
-    fn sig_state() -> (u64, u64, u64) {
+    /// Ground truth from the kernel for the CALLING thread: (live-tids
+    /// of the process, my tid, blocked, pending, caught). Cross-checks
+    /// that raw `syscall0(gettid)` tells the truth and that no mask
+    /// hides our signal. std::fs exists in tests; pure parsing.
+    fn sig_state() -> (bool, u64, u64, u64) {
         use crate::syscall::syscall0;
         let tid = unsafe { syscall0(186) };
+        let mut live = false;
+        if let Ok(rd) = std::fs::read_dir("/proc/self/task") {
+            for e in rd.flatten() {
+                if e.file_name().to_string_lossy() == tid.to_string() {
+                    live = true;
+                }
+            }
+        }
         let path = std::format!("/proc/self/task/{tid}/status");
         let s = std::fs::read_to_string(&path).unwrap_or_default();
         let mut blk = 0u64;
@@ -538,7 +546,7 @@ mod tests {
                 cgt = h;
             }
         }
-        (blk, pnd, cgt)
+        (live, blk, pnd, cgt)
     }
 
     /// Delivery probe (diagnostic ladder step 1): a trivial handler
@@ -578,11 +586,11 @@ mod tests {
                 core::hint::spin_loop();
                 spins += 1;
             }
-            let (blk, pnd, cgt) = sig_state();
+            let (live, blk, pnd, cgt) = sig_state();
             assert_eq!(
                 PROBE_HIT.load(Ordering::SeqCst),
                 1,
-                "handler never ran (blk={blk:#x} pnd={pnd:#x} cgt={cgt:#x})"
+                "handler never ran (live={live} blk={blk:#x} pnd={pnd:#x} cgt={cgt:#x})"
             );
             // Leave no trace: restore default disposition.
             let dfl = KernelSigaction {
