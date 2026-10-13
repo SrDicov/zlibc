@@ -342,6 +342,9 @@ use-after-unmap nondeterminista.
   own build script so host build tools keep working, `rust_eh_personality`
   stub living in hello — never in the lib) boots through our `_start` →
   `main` → `puts` → `exit`, asserting exact bytes + status in CI.
+  Packet 2 DONE (v0.6): `hello-threads` — clone/join + `printf` in a real
+  binary, covering the path unit tests never touch (`ensure_main_tp`
+  taking over `FS` at real boot instead of early-returning for glibc).
 
 ## "100% done" criteria
 
