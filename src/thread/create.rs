@@ -208,12 +208,6 @@ unsafe fn thread_exit(td: *mut Thread, res: *mut c_void) -> ! {
                     op = const { crate::futex::FUTEX_WAKE | crate::futex::FUTEX_PRIVATE },
                     sys = const crate::futex::SYS_FUTEX,
                     esys = const SYS_EXIT,
-                    out("rax") _,
-                    out("rdi") _,
-                    out("rsi") _,
-                    out("rdx") _,
-                    out("rcx") _,
-                    out("r11") _,
                     options(noreturn),
                 );
             }
