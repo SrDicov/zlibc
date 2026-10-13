@@ -450,7 +450,11 @@ pub unsafe extern "C" fn fclose(f: *mut File) -> c_int {
             }
             free(f as *mut c_void);
         }
-        if ok { 0 } else { EOF }
+        if ok {
+            0
+        } else {
+            EOF
+        }
     }
 }
 
@@ -652,7 +656,11 @@ pub unsafe extern "C" fn puts(s: *const c_char) -> c_int {
         slock();
         let ok = put_byte_locked(f, b'\n') && flush_locked(f);
         sunlock();
-        if ok { 0 } else { EOF }
+        if ok {
+            0
+        } else {
+            EOF
+        }
     }
 }
 
@@ -664,7 +672,11 @@ pub unsafe extern "C" fn puts(s: *const c_char) -> c_int {
 
 enum Sink {
     Fd(c_int),
-    Buf { base: *mut u8, cap: usize, len: usize },
+    Buf {
+        base: *mut u8,
+        cap: usize,
+        len: usize,
+    },
 }
 
 struct Out<'a> {
@@ -1057,7 +1069,9 @@ unsafe fn fmt_driver(sink: &mut Sink, fmt: *const c_char, mut ap: VaList) -> c_i
                     }
                 }
             };
-            convert(&mut out, spec, flags, width, prec, uval, sval, neg, word, wlen, &mut ap);
+            convert(
+                &mut out, spec, flags, width, prec, uval, sval, neg, word, wlen, &mut ap,
+            );
             if out.failed {
                 return -1;
             }
@@ -1197,7 +1211,10 @@ mod tests {
     unsafe fn new_pipe() -> (c_int, c_int) {
         unsafe {
             let mut fds = [0 as c_int; 2];
-            assert_eq!(syscall_ret(syscall2(SYS_PIPE, fds.as_mut_ptr() as usize, 0)), 0);
+            assert_eq!(
+                syscall_ret(syscall2(SYS_PIPE, fds.as_mut_ptr() as usize, 0)),
+                0
+            );
             (fds[0], fds[1])
         }
     }
@@ -1209,7 +1226,10 @@ mod tests {
             let wf = fdopen(w, c"w".as_ptr());
             assert!(!wf.is_null());
             let msg = b"hello stdio 12345";
-            assert_eq!(fwrite(msg.as_ptr() as *const _, 1, msg.len(), wf), msg.len());
+            assert_eq!(
+                fwrite(msg.as_ptr() as *const _, 1, msg.len(), wf),
+                msg.len()
+            );
             assert_eq!(fclose(wf), 0);
             let rf = fdopen(r, c"r".as_ptr());
             assert!(!rf.is_null());
@@ -1274,7 +1294,11 @@ mod tests {
             assert_eq!((n1, n2), (46, 50));
             // Truncation: would-be length returned, buffer NUL-capped.
             let mut small = [0u8; 8];
-            let rc = snprintf(small.as_mut_ptr() as *mut c_char, small.len(), c"0123456789abcdef".as_ptr());
+            let rc = snprintf(
+                small.as_mut_ptr() as *mut c_char,
+                small.len(),
+                c"0123456789abcdef".as_ptr(),
+            );
             assert_eq!(rc, 16);
             assert_eq!(&small, b"0123456\0");
             // %p carries a 0x prefix; %#x too.
