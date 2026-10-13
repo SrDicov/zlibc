@@ -19,7 +19,7 @@ use core::ptr::{addr_of_mut, null_mut};
 
 use crate::errno::__errno_location;
 use crate::mem::{memcpy, memset};
-use crate::sync::{MutexT, pthread_mutex_lock, pthread_mutex_unlock};
+use crate::sync::{pthread_mutex_lock, pthread_mutex_unlock, MutexT};
 use crate::syscall::{syscall6, syscall_ret};
 
 // ---- Syscalls/consts (musl arch/x86_64/bits/syscall.h.in) -------------------
@@ -259,8 +259,7 @@ pub unsafe extern "C" fn realloc(p: *mut c_void, n: usize) -> *mut c_void {
             set_oom();
             return null_mut();
         }
-        let need = align_up(n.max(1))
-            .and_then(|m| m.checked_add(size_of::<Chunk>()));
+        let need = align_up(n.max(1)).and_then(|m| m.checked_add(size_of::<Chunk>()));
         let need = match need {
             Some(m) => m,
             None => {
