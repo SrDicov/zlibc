@@ -27,6 +27,8 @@ use crate::syscall::{syscall6, syscall_ret};
 const SYS_MMAP: usize = 9; // TODO: generate from arch bits/syscall.h
 /// musl `arch/generic/bits/errno.h:12`.
 const ENOMEM: c_int = 12;
+/// musl `arch/generic/bits/errno.h:22`.
+const EINVAL: c_int = 22;
 /// musl `include/sys/mman.h`.
 const PROT_RW: c_int = 1 | 2; // PROT_READ | PROT_WRITE
 const MAP_ANON: c_int = 0x02 | 0x20; // MAP_PRIVATE | MAP_ANONYMOUS
@@ -36,6 +38,11 @@ const ALIGN: usize = 16;
 const ARENA_MIN: usize = 65536;
 /// Header + smallest payload: splits leaving less never pay off.
 const MIN_CHUNK: usize = 32;
+/// Over-aligned records live here, not in-band: a magic stamp before the
+/// payload would be ambiguous with a plain chunk header's link word.
+/// 64 concurrent over-aligned objects is plenty for a lite engine; when
+/// full, aligned requests fail clean instead of corrupting (`shortcut:` —
+/// spill to chained blocks if ever measured full, not before).
 
 /// Chunk header: total size (this header included) + intrusive free link.
 /// Exactly 16 bytes, so payload stays 16-aligned.
@@ -44,8 +51,21 @@ struct Chunk {
     next: *mut Chunk,
 }
 
+/// One live over-aligned object: payload address → chunk base + total.
+#[derive(Clone, Copy)]
+struct AlignRec {
+    addr: usize,
+    orig: usize,
+    total: usize,
+}
+
 static mut FREE_HEAD: *mut Chunk = null_mut();
 static mut HEAP_LOCK: MutexT = [0; 5];
+static mut AMAP: [AlignRec; 64] = [AlignRec {
+    addr: 0,
+    orig: 0,
+    total: 0,
+}; 64];
 
 fn lock() {
     unsafe {
@@ -101,6 +121,115 @@ unsafe fn take(need: usize) -> *mut u8 {
     }
 }
 
+/// Chunk total needed for `size` payload bytes at `alignment` (power of
+/// two, ≥ 16): header + payload + worst-case pad. Chunk bases are always
+/// 16-aligned, so padding above 16 tops out at `alignment - 16`.
+fn want_total(alignment: usize, size: usize) -> Option<usize> {
+    align_up(size.max(1))
+        .and_then(|m| m.checked_add(size_of::<Chunk>()))
+        .and_then(|m| m.checked_add(alignment - 16))
+}
+
+/// Take an `alignment`-aligned payload (lock held). Records over-aligned
+/// objects in the side map; 16-aligned payloads need no record (their
+/// header sits right before them, like plain chunks). Null on miss, full
+/// map, or overflow — the caller mmaps and retries once.
+unsafe fn take_aligned(alignment: usize, size: usize) -> *mut u8 {
+    unsafe {
+        let want = match want_total(alignment, size) {
+            Some(m) => m,
+            None => return null_mut(),
+        };
+        let raw = take(want);
+        if raw.is_null() {
+            return null_mut();
+        }
+        // `raw` is 16-aligned and so is every power-of-two step above.
+        let addr = (raw as usize + alignment - 1) & !(alignment - 1);
+        if addr != raw as usize {
+            let mut slot = null_mut::<AlignRec>();
+            let mut k = 0;
+            while k < 64 {
+                let r = addr_of_mut!(AMAP).cast::<AlignRec>().add(k);
+                if (*r).addr == 0 && slot.is_null() {
+                    slot = r;
+                }
+                k += 1;
+            }
+            if slot.is_null() {
+                give(raw, want);
+                return null_mut();
+            }
+            let orig = (raw as usize - size_of::<Chunk>()) as *mut Chunk;
+            (*slot).addr = addr;
+            (*slot).orig = orig as usize;
+            (*slot).total = (*orig).size;
+        }
+        addr as *mut u8
+    }
+}
+
+/// Fresh address space for a `want`-sized chunk (lock held): one rounded
+/// arena, fed whole; splitting happens in `take`.
+unsafe fn refill(want: usize) -> bool {
+    unsafe {
+        let arena = match want.max(ARENA_MIN).checked_add(4095).map(|m| m & !4095) {
+            Some(m) => m,
+            None => return false,
+        };
+        let map = syscall_ret(syscall6(
+            SYS_MMAP,
+            0,
+            arena,
+            PROT_RW as usize,
+            MAP_ANON as usize,
+            usize::MAX,
+            0,
+        ));
+        if map == -1 {
+            return false;
+        }
+        feed(map as *mut u8, arena);
+        true
+    }
+}
+
+/// Release a live payload (lock held): side-map hit for over-aligned,
+/// header math for plain.
+unsafe fn free_inner(addr: usize) {
+    unsafe {
+        let mut k = 0;
+        while k < 64 {
+            let r = addr_of_mut!(AMAP).cast::<AlignRec>().add(k);
+            if (*r).addr == addr {
+                (*r).addr = 0;
+                give((*r).orig as *mut u8, (*r).total);
+                return;
+            }
+            k += 1;
+        }
+        let orig = (addr - size_of::<Chunk>()) as *mut Chunk;
+        give(orig as *mut u8, (*orig).size);
+    }
+}
+
+/// Usable bytes behind a live payload (lock held): side-map hit for
+/// over-aligned, header math for plain.
+unsafe fn usable(addr: usize) -> usize {
+    unsafe {
+        let mut k = 0;
+        while k < 64 {
+            let r = addr_of_mut!(AMAP).cast::<AlignRec>().add(k);
+            if (*r).addr == addr {
+                return (*r).orig + (*r).total - addr;
+            }
+            k += 1;
+        }
+        let orig = (addr - size_of::<Chunk>()) as *mut Chunk;
+        (*orig).size - size_of::<Chunk>()
+    }
+}
+
 /// Insert a freed chunk address-ordered, merging live neighbours.
 unsafe fn give(ptr: *mut u8, len: usize) {
     unsafe {
@@ -141,6 +270,41 @@ fn set_oom() {
     }
 }
 
+fn set_err(e: c_int) {
+    unsafe {
+        *__errno_location() = e;
+    }
+}
+
+/// Shared engine for every entry point (lock inside): `size` payload
+/// bytes at `alignment` (power of two, ≥ 16), one arena refill on miss.
+unsafe fn aligned_body(alignment: usize, size: usize) -> *mut c_void {
+    unsafe {
+        // musl oversize gate (`SIZE_MAX/2`, lite_malloc.c).
+        if size > usize::MAX / 2 {
+            set_oom();
+            return null_mut();
+        }
+        let want = match want_total(alignment, size) {
+            Some(m) => m,
+            None => {
+                set_oom();
+                return null_mut();
+            }
+        };
+        lock();
+        let mut out = take_aligned(alignment, size);
+        if out.is_null() && refill(want) {
+            out = take_aligned(alignment, size);
+        }
+        unlock();
+        if out.is_null() {
+            set_oom();
+        }
+        out as *mut c_void
+    }
+}
+
 /// Allocate `n` bytes (musl `malloc`, `src/malloc/mallocng/malloc.c`
 /// contract: 0 → smallest object, oversize → `ENOMEM` + NULL).
 ///
@@ -151,62 +315,15 @@ fn set_oom() {
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
 pub unsafe extern "C" fn malloc(n: usize) -> *mut c_void {
-    unsafe {
-        let mut need = match align_up(n.max(1)) {
-            Some(m) => m,
-            None => {
-                set_oom();
-                return null_mut();
-            }
-        };
-        need = match need.checked_add(size_of::<Chunk>()) {
-            Some(m) => m,
-            None => {
-                set_oom();
-                return null_mut();
-            }
-        };
-        // musl oversize gate (`SIZE_MAX/2`, lite_malloc.c).
-        if n > usize::MAX / 2 {
-            set_oom();
-            return null_mut();
-        }
-        lock();
-        let mut out = take(need);
-        if out.is_null() {
-            let mut arena = need.max(ARENA_MIN);
-            arena = (arena + 4095) & !4095;
-            let map = syscall_ret(syscall6(
-                SYS_MMAP,
-                0,
-                arena,
-                PROT_RW as usize,
-                MAP_ANON as usize,
-                usize::MAX,
-                0,
-            ));
-            if map == -1 {
-                unlock();
-                set_oom();
-                return null_mut();
-            }
-            feed(map as *mut u8, arena);
-            out = take(need);
-        }
-        unlock();
-        if out.is_null() {
-            set_oom();
-        }
-        out as *mut c_void
-    }
+    unsafe { aligned_body(16, n) }
 }
 
 /// Release `p` (musl `free`: NULL is a no-op).
 ///
 /// # Safety
 ///
-/// `p` must be null or a live pointer from [`malloc`]/[`calloc`]/
-/// [`realloc`], freed exactly once.
+/// `p` must be null or a live pointer from any entry point in this
+/// module (plain or over-aligned), freed exactly once.
 #[no_mangle]
 pub unsafe extern "C" fn free(p: *mut c_void) {
     if p.is_null() {
@@ -214,8 +331,7 @@ pub unsafe extern "C" fn free(p: *mut c_void) {
     }
     unsafe {
         lock();
-        let c = (p as *mut u8).sub(size_of::<Chunk>()) as *mut Chunk;
-        give(p as *mut u8, (*c).size);
+        free_inner(p as usize);
         unlock();
     }
 }
@@ -259,8 +375,7 @@ pub unsafe extern "C" fn realloc(p: *mut c_void, n: usize) -> *mut c_void {
             set_oom();
             return null_mut();
         }
-        let need = align_up(n.max(1)).and_then(|m| m.checked_add(size_of::<Chunk>()));
-        let need = match need {
+        let aligned = match align_up(n.max(1)) {
             Some(m) => m,
             None => {
                 set_oom();
@@ -268,28 +383,102 @@ pub unsafe extern "C" fn realloc(p: *mut c_void, n: usize) -> *mut c_void {
             }
         };
         lock();
-        let c = (p as *mut u8).sub(size_of::<Chunk>()) as *mut Chunk;
-        let old = (*c).size;
-        if need <= old {
-            // Shrink in place; the leftover stays wasted (cold path,
-            // no split — simplicity over a few bytes).
+        let old = usable(p as usize);
+        if aligned <= old {
+            // In place when it fits (aligned payloads keep their
+            // alignment; plain shrink wastes the leftover — cold path
+            // simplicity, same as before).
             unlock();
             return p;
         }
+        let keep = old.min(n);
         unlock();
         let q = malloc(n);
         if q.is_null() {
             return null_mut();
         }
-        memcpy(q, p, old - size_of::<Chunk>());
+        memcpy(q, p, keep);
         free(p);
         q
     }
 }
 
+/// Aligned allocation, C11 (musl `aligned_alloc`: non-zero power-of-two
+/// alignment with `size` a multiple of it, else `EINVAL` + NULL).
+///
+/// # Safety
+///
+/// Same validity contract as [`malloc`], plus `p % alignment == 0`.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn aligned_alloc(alignment: usize, size: usize) -> *mut c_void {
+    unsafe {
+        if alignment == 0
+            || alignment & (alignment - 1) != 0
+            || size % alignment != 0
+        {
+            set_err(EINVAL);
+            return null_mut();
+        }
+        aligned_body(alignment.max(16), size)
+    }
+}
+
+/// Aligned allocation, POSIX (musl `posix_memalign`: power-of-two
+/// alignment, else `EINVAL`; NULL `memptr` is `EINVAL`, never a fault).
+///
+/// # Safety
+///
+/// `memptr` must be writable; on success it holds a live aligned object.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn posix_memalign(
+    memptr: *mut *mut c_void,
+    alignment: usize,
+    size: usize,
+) -> c_int {
+    if memptr.is_null() {
+        return EINVAL;
+    }
+    unsafe {
+        if alignment == 0 || alignment & (alignment - 1) != 0 {
+            *memptr = null_mut();
+            return EINVAL;
+        }
+        let p = aligned_body(alignment.max(16), size);
+        *memptr = p;
+        if p.is_null() { ENOMEM } else { 0 }
+    }
+}
+
+/// Aligned allocation, lenient (musl `memalign`: rounds the alignment up
+/// to a usable power of two instead of failing).
+///
+/// # Safety
+///
+/// Same validity contract as [`aligned_alloc`].
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn memalign(alignment: usize, size: usize) -> *mut c_void {
+    unsafe {
+        // Bit-trick pow2 ceiling (no version-sensitive helpers): wrap on
+        // absurd input lands below 16 and fails clean through the gate.
+        let mut a = alignment.max(16).wrapping_sub(1);
+        a |= a >> 1;
+        a |= a >> 2;
+        a |= a >> 4;
+        a |= a >> 8;
+        a |= a >> 16;
+        #[cfg(target_pointer_width = "64")]
+        let a = a | (a >> 32);
+        let a = a.wrapping_add(1);
+        aligned_body(a.max(16), size)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{calloc, free, malloc, realloc};
+    use super::{aligned_alloc, calloc, free, malloc, memalign, posix_memalign, realloc, EINVAL};
     use core::ptr::null_mut;
 
     unsafe fn sum(p: *mut u8, n: usize) -> usize {
@@ -363,6 +552,53 @@ mod tests {
             assert!(!s.is_null());
             free(r as *mut core::ffi::c_void);
             free(s);
+        }
+    }
+
+    #[test]
+    fn aligned_entry_points_roundtrip() {
+        unsafe {
+            // posix_memalign across alignments, content survives, free works.
+            let mut k = 0;
+            while k < 6 {
+                let al = 16 << k; // 16..512
+                let mut p: *mut core::ffi::c_void = null_mut();
+                assert_eq!(posix_memalign(&mut p, al, 1000), 0);
+                assert!(!p.is_null());
+                assert_eq!((p as usize) % al, 0);
+                *(p as *mut u8) = 0x77;
+                *((p as *mut u8).add(999)) = 0x77;
+                free(p);
+                k += 1;
+            }
+            // aligned_alloc strictness (C11): bad input is NULL, errno set.
+            assert!(aligned_alloc(0, 64).is_null());
+            assert!(aligned_alloc(24, 64).is_null());
+            assert!(aligned_alloc(64, 100).is_null());
+            let a = aligned_alloc(64, 128);
+            assert!(!a.is_null() && (a as usize) % 64 == 0);
+            // realloc keeps the bytes (alignment may relax to 16, C-legal).
+            *(a as *mut u8) = 0x3c;
+            let g = realloc(a, 4096);
+            assert!(!g.is_null() && *(g as *mut u8) == 0x3c);
+            free(g);
+            // memalign rounds leniently instead of failing.
+            let m = memalign(24, 64);
+            assert!(!m.is_null() && (m as usize) % 32 == 0);
+            free(m);
+            // posix_memalign rejects without touching live state.
+            let mut q: *mut core::ffi::c_void = null_mut();
+            assert_eq!(posix_memalign(null_mut(), 16, 16), EINVAL);
+            assert_eq!(posix_memalign(&mut q, 20, 16), EINVAL);
+            assert!(q.is_null());
+            // Sequential churn reuses the 64 side-map slots forever.
+            let mut j = 0;
+            while j < 200 {
+                let mut r: *mut core::ffi::c_void = null_mut();
+                assert_eq!(posix_memalign(&mut r, 64, 64), 0);
+                free(r);
+                j += 1;
+            }
         }
     }
 
