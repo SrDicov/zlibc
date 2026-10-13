@@ -6,24 +6,35 @@
 //! parent joins, reads back, and checks every byte. If allocation,
 //! formatting, threads, and fds interoperate, the wave-4 gate holds.
 
+#[cfg(test)]
 use core::ffi::{c_char, c_int, c_void};
+#[cfg(test)]
 use core::ptr::{addr_of_mut, null_mut};
+#[cfg(test)]
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+#[cfg(test)]
 use crate::abi::PthreadT;
+#[cfg(test)]
 use crate::malloc::{free, malloc};
+#[cfg(test)]
 use crate::net::{recvfrom, sendto, socketpair, AF_UNIX, SOCK_STREAM};
+#[cfg(test)]
 use crate::thread::create::{__pthread_create, __pthread_join};
 
+#[cfg(test)]
 extern "C" {
     fn snprintf(s: *mut c_char, n: usize, fmt: *const c_char, ...) -> c_int;
 }
 
+#[cfg(test)]
 static GOT0: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
 static GOT1: AtomicUsize = AtomicUsize::new(0);
 
 /// Child code: format, send, release. Pure our-ABI calls only — never
 /// touches host TLS (its `FS` is our TCB) and never asserts.
+#[cfg(test)]
 unsafe extern "C" fn hello_child(arg: *mut c_void) -> *mut c_void {
     unsafe {
         let slot = arg as *mut c_int;
@@ -48,6 +59,7 @@ unsafe extern "C" fn hello_child(arg: *mut c_void) -> *mut c_void {
     }
 }
 
+#[cfg(test)]
 unsafe fn read_all(fd: c_int, out: &mut [u8]) -> usize {
     unsafe {
         let mut got = 0usize;
@@ -69,6 +81,7 @@ unsafe fn read_all(fd: c_int, out: &mut [u8]) -> usize {
     }
 }
 
+#[cfg(test)]
 unsafe fn close_fd(fd: c_int) {
     unsafe {
         use crate::syscall::{syscall3, syscall_ret};
