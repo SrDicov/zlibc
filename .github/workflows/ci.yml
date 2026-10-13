@@ -35,12 +35,13 @@ jobs:
         run: cargo build --verbose --target x86_64-unknown-linux-musl
 
       - name: Test (non-thread, parallel)
-        run: 'cargo test --verbose -- --skip thread::'
+        run: 'cargo test --verbose -- --skip thread:: --skip errno::tests::errno_is_per_thread'
       # Thread tests touch per-thread CPU state (FS) and process-global
       # signal dispositions/registry: serial by design, like musl's own
       # tests. Parallel cargo threads would interleave that global state.
+      # The errno test clones a real thread, so it rides along here.
       - name: Test thread (serial)
-        run: 'cargo test --verbose -- thread:: --test-threads=1'
+        run: 'cargo test --verbose -- thread:: errno::tests::errno_is_per_thread --test-threads=1'
       # DIAG ONLY segv hunt (revert): backtrace the parallel-step death.
       - name: DIAG gdb parallel segv
         if: always()
@@ -48,4 +49,4 @@ jobs:
           sudo apt-get install -y gdb
           cargo test --no-run --verbose
           BIN=$(ls -t target/debug/deps/zlibc-* | grep -v '\.' | head -1)
-          timeout 120 gdb -batch -ex 'set confirm off' -ex run -ex 'thread apply all bt 8' -ex 'info registers rip rsp rdi rsi fs_base' -ex 'x/gx $fs_base+128' --args "$BIN" --skip thread:: --test-threads=8 --nocapture | tail -60
+          timeout 120 gdb -batch -ex 'set confirm off' -ex run -ex 'thread apply all bt 8' -ex 'info registers rip rsp rdi rsi fs_base' -ex 'x/gx $fs_base+128' --args "$BIN" --skip thread:: --skip errno::tests::errno_is_per_thread --test-threads=8 --nocapture | tail -60
