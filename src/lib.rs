@@ -11,6 +11,7 @@ pub mod errno;
 pub mod futex;
 pub mod ldso;
 pub mod libm;
+pub mod malloc;
 pub mod mem;
 pub mod panic;
 pub mod start;

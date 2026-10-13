@@ -327,6 +327,9 @@ vida solo tocan hilos garantizados vivos, o el segundo detach firma un
 use-after-unmap nondeterminista.
 - **Wave 4** — stdio, mallocng, libm, locale/network/misc, validation.
   Gate: hello + pthreads + malloc/stdio running, CI green on `main`.
+  Packets (each one push, green before next): D0 errno per-thread DONE
+  (`THREAD_MAGIC`, 43 tests); D3a `fabs/copysign` DONE; D2 allocator;
+  D1 stdio; D3b libm core; D4 locale stubs + socket wrappers; D5 gate.
 
 ## "100% done" criteria
 
