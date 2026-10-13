@@ -5,28 +5,24 @@
 //! or ABI-struct impact: these add symbols, not layouts.
 
 /// Absolute value, bit-exact (clears the sign bit, preserves NaN payload).
-#[inline]
 #[no_mangle]
 pub extern "C" fn fabs(x: f64) -> f64 {
     f64::from_bits(x.to_bits() & !0x8000_0000_0000_0000)
 }
 
 /// `fabs` for `f32`.
-#[inline]
 #[no_mangle]
 pub extern "C" fn fabsf(x: f32) -> f32 {
     f32::from_bits(x.to_bits() & !0x8000_0000)
 }
 
 /// Copy sign: magnitude of `x` with the sign of `y` (NaN payload kept).
-#[inline]
 #[no_mangle]
 pub extern "C" fn copysign(x: f64, y: f64) -> f64 {
     f64::from_bits((x.to_bits() & !0x8000_0000_0000_0000) | (y.to_bits() & 0x8000_0000_0000_0000))
 }
 
 /// `copysign` for `f32`.
-#[inline]
 #[no_mangle]
 pub extern "C" fn copysignf(x: f32, y: f32) -> f32 {
     f32::from_bits((x.to_bits() & !0x8000_0000) | (y.to_bits() & 0x8000_0000))
