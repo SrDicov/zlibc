@@ -11,12 +11,6 @@
 use core::ffi::{c_char, c_int};
 use core::ptr::null;
 
-// Pin the dependency's metadata: this binary calls zlibc only through
-// its own foreign declarations, and without a single `zlibc::` path
-// rustc never loads the rlib metadata — where our `#[panic_handler]`
-// lives — and fails the whole crate with "handler not found".
-extern crate zlibc;
-
 #[path = "../personality.rs"]
 mod personality;
 
