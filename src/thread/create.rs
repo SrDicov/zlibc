@@ -165,6 +165,15 @@ unsafe extern "C" fn child_entry(arg: usize) -> c_int {
 /// `td` must be the calling thread's live `Thread`; `res` is stored for
 /// the joiner. Callers on the joinable path must already be past any use
 /// of the stack after the final trap (they are: exit never returns).
+///
+/// Post-publish discipline (joinable branch): the joiner may unmap this
+/// stack the instant `DT_EXITED` is visible, so everything past the store
+/// is registers-only inside one opaque trap block. A plain `wake` call
+/// uses the stack (call + body spills) — the joiner freeing it mid-call
+/// was the flaky SIGSEGV (null-rip cores in lifecycle/validation).
+/// Store discipline mirrors musl (plain store + wake trap as the
+/// barrier; TSO orders it before the traps). No ENOSYS fallback:
+/// `PRIVATE` needs 2.6.22+, like all of NPTL.
 #[cfg(target_arch = "x86_64")]
 unsafe fn thread_exit(td: *mut Thread, res: *mut c_void) -> ! {
     unsafe {
@@ -181,15 +190,7 @@ unsafe fn thread_exit(td: *mut Thread, res: *mut c_void) -> ! {
         };
         if st == DT_JOINABLE {
             super::synccall::unregister_thread(td); // C3: unlink before DT_EXITED wakes join.
-            // Publish death, then wake + die WITHOUT touching memory
-            // again: the joiner may unmap this stack the instant EXITED
-            // is visible, so everything past the store is registers-only
-            // inside one opaque block. A plain `wake` call uses the stack
-            // (call + body spills) — the joiner freeing it mid-call was
-            // the flaky SIGSEGV (null-rip cores in lifecycle/validation).
-            // Store discipline mirrors musl (plain store + wake trap as
-            // the barrier; TSO orders it before the traps below). No
-            // ENOSYS fallback: PRIVATE needs 2.6.22+, like all of NPTL.
+            // Publish + wake + die with no memory touched past the store.
             unsafe {
                 core::arch::asm!(
                     "mov dword ptr [{td} + {off}], {exited}",
