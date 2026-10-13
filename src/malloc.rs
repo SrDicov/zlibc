@@ -38,11 +38,6 @@ const ALIGN: usize = 16;
 const ARENA_MIN: usize = 65536;
 /// Header + smallest payload: splits leaving less never pay off.
 const MIN_CHUNK: usize = 32;
-/// Over-aligned records live here, not in-band: a magic stamp before the
-/// payload would be ambiguous with a plain chunk header's link word.
-/// 64 concurrent over-aligned objects is plenty for a lite engine; when
-/// full, aligned requests fail clean instead of corrupting (`shortcut:` —
-/// spill to chained blocks if ever measured full, not before).
 
 /// Chunk header: total size (this header included) + intrusive free link.
 /// Exactly 16 bytes, so payload stays 16-aligned.
@@ -61,6 +56,11 @@ struct AlignRec {
 
 static mut FREE_HEAD: *mut Chunk = null_mut();
 static mut HEAP_LOCK: MutexT = [0; 5];
+/// Over-aligned records live here, not in-band: a magic stamp before the
+/// payload would be ambiguous with a plain chunk header's link word.
+/// 64 concurrent over-aligned objects is plenty for a lite engine; when
+/// full, aligned requests fail clean instead of corrupting (`shortcut:` —
+/// spill to chained blocks if ever measured full, not before).
 static mut AMAP: [AlignRec; 64] = [AlignRec {
     addr: 0,
     orig: 0,
@@ -413,7 +413,7 @@ pub unsafe extern "C" fn realloc(p: *mut c_void, n: usize) -> *mut c_void {
 #[no_mangle]
 pub unsafe extern "C" fn aligned_alloc(alignment: usize, size: usize) -> *mut c_void {
     unsafe {
-        if alignment == 0 || alignment & (alignment - 1) != 0 || size % alignment != 0 {
+        if alignment == 0 || alignment & (alignment - 1) != 0 || !size.is_multiple_of(alignment) {
             set_err(EINVAL);
             return null_mut();
         }
@@ -566,7 +566,7 @@ mod tests {
                 let mut p: *mut core::ffi::c_void = null_mut();
                 assert_eq!(posix_memalign(&mut p, al, 1000), 0);
                 assert!(!p.is_null());
-                assert_eq!((p as usize) % al, 0);
+                assert!((p as usize).is_multiple_of(al));
                 *(p as *mut u8) = 0x77;
                 *((p as *mut u8).add(999)) = 0x77;
                 free(p);
@@ -577,7 +577,7 @@ mod tests {
             assert!(aligned_alloc(24, 64).is_null());
             assert!(aligned_alloc(64, 100).is_null());
             let a = aligned_alloc(64, 128);
-            assert!(!a.is_null() && (a as usize) % 64 == 0);
+            assert!(!a.is_null() && (a as usize).is_multiple_of(64));
             // realloc keeps the bytes (alignment may relax to 16, C-legal).
             *(a as *mut u8) = 0x3c;
             let g = realloc(a, 4096);
@@ -585,7 +585,7 @@ mod tests {
             free(g);
             // memalign rounds leniently instead of failing.
             let m = memalign(24, 64);
-            assert!(!m.is_null() && (m as usize) % 32 == 0);
+            assert!(!m.is_null() && (m as usize).is_multiple_of(32));
             free(m);
             // posix_memalign rejects without touching live state.
             let mut q: *mut core::ffi::c_void = null_mut();
