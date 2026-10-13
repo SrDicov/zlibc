@@ -512,6 +512,30 @@ mod tests {
         PROBE_HIT.store(1, Ordering::SeqCst);
     }
 
+    /// Ground truth from the kernel: (blocked, pending, caught) masks.
+    /// std::fs exists in tests; pure parsing, no unsafe.
+    fn sig_state() -> (u64, u64, u64) {
+        let s = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+        let mut blk = 0u64;
+        let mut pnd = 0u64;
+        let mut cgt = 0u64;
+        for line in s.lines() {
+            let (k, v) = match line.split_once(':') {
+                Some(p) => p,
+                None => continue,
+            };
+            let h = u64::from_str_radix(v.trim(), 16).unwrap_or(0);
+            if k == "SigBlk" {
+                blk = h;
+            } else if k == "SigPnd" {
+                pnd = h;
+            } else if k == "SigCgt" {
+                cgt = h;
+            }
+        }
+        (blk, pnd, cgt)
+    }
+
     /// Delivery probe (diagnostic ladder step 1): a trivial handler
     /// installed through OUR `KernelSigaction` path for an otherwise
     /// unused RT signal must run when we tkill ourselves. Minimal flags
@@ -549,7 +573,12 @@ mod tests {
                 core::hint::spin_loop();
                 spins += 1;
             }
-            assert_eq!(PROBE_HIT.load(Ordering::SeqCst), 1, "handler never ran");
+            let (blk, pnd, cgt) = sig_state();
+            assert_eq!(
+                PROBE_HIT.load(Ordering::SeqCst),
+                1,
+                "handler never ran (blk={blk:#x} pnd={pnd:#x} cgt={cgt:#x})"
+            );
             // Leave no trace: restore default disposition.
             let dfl = KernelSigaction {
                 handler: 0,
