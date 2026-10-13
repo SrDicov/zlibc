@@ -39,7 +39,7 @@ pub extern "C" fn trunc(x: f64) -> f64 {
     } else if e > 1074 {
         x
     } else {
-        f64::from_bits(u & !((1u64 << (1074 - e)) - 1))
+        f64::from_bits(u & !((1u64 << (1075 - e)) - 1))
     }
 }
 
