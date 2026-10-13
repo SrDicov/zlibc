@@ -41,7 +41,7 @@ jobs:
       - name: Test thread create only
         run: 'timeout 100 cargo test --verbose -- thread::create:: --test-threads=1'
       - name: Test synccall only
-        run: 'timeout 100 cargo test --verbose -- thread::synccall --test-threads=1'
+        run: 'timeout 100 cargo test --verbose -- thread::synccall::tests::signal_delivery --test-threads=1'
       # DIAG ONLY gdb the wave fault (revert): breakpoint at handler entry
       # tells entry apart from delivery faults; then step a few insns.
       - name: DIAG gdb wave fault
