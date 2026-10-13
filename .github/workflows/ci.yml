@@ -42,13 +42,11 @@ jobs:
         run: 'timeout 100 cargo test --verbose -- thread::create:: --test-threads=1'
       - name: Test synccall only
         run: 'timeout 100 cargo test --verbose -- thread::synccall --test-threads=1'
-      # DIAG ONLY strace the hanging wave (revert): shows the exact
-      # trapping syscall instead of theorizing about it.
-      - name: DIAG strace synccall wave
+      # DIAG ONLY gdb the wave fault (revert): backtrace + regs at SIGSEGV.
+      - name: DIAG gdb wave fault
         if: always()
         run: |
-          sudo apt-get install -y strace
+          sudo apt-get install -y gdb
           cargo test --no-run --verbose
           BIN=$(ls -t target/debug/deps/zlibc-* | grep -v '\.' | head -1)
-          echo "tracing $BIN"
-          timeout 60 strace -f -e trace=arch_prctl,clone,tkill,rt_sigaction,rt_sigprocmask,futex,mmap,mprotect,exit,exit_group "$BIN" thread::synccall --test-threads=1 --nocapture | tail -50
+          timeout 120 gdb -batch -ex 'handle SIGRT_2 nostop noprint pass' -ex 'set confirm off' -ex run -ex 'bt 25' -ex 'info registers rip rsp fs_base' --args "$BIN" thread::synccall --test-threads=1 --nocapture | tail -60
