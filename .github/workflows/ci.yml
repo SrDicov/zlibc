@@ -67,7 +67,10 @@ jobs:
         run: |
           cd hello
           cargo fmt --check
-          cargo clippy -- -D warnings
+          for b in hello hello-threads hello-malloc hello-args; do
+            echo "== clippy $b =="
+            cargo clippy --bin "$b" -- -D warnings || exit 1
+          done
           cargo build --verbose
           out=$(./target/debug/hello)
           test "$out" = "hello from zlibc"
