@@ -16,6 +16,8 @@ pub mod start;
 pub mod symbols;
 pub mod sync;
 pub mod syscall;
+#[cfg(target_arch = "x86_64")]
+pub mod thread;
 
 // OUT_DIR/abi_probed.rs is emitted by build.rs with sizes/offsets
 // measured from the real musl headers (see probe/probe.c).

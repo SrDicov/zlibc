@@ -34,5 +34,10 @@ jobs:
       - name: Build (x86_64-unknown-linux-musl)
         run: cargo build --verbose --target x86_64-unknown-linux-musl
 
-      - name: Test (runs build.rs ABI probe + asserts + unit tests)
-        run: cargo test --verbose
+      - name: Test (non-thread, parallel)
+        run: 'cargo test --verbose -- --skip thread::'
+      # Thread tests touch per-thread CPU state (FS) and process-global
+      # signal dispositions/registry: serial by design, like musl's own
+      # tests. Parallel cargo threads would interleave that global state.
+      - name: Test thread (serial)
+        run: 'cargo test --verbose -- thread:: --test-threads=1'
