@@ -190,7 +190,6 @@ unsafe fn thread_exit(td: *mut Thread, res: *mut c_void) -> ! {
         };
         if st == DT_JOINABLE {
             super::synccall::unregister_thread(td); // C3: unlink before DT_EXITED wakes join.
-            // Publish + wake + die with no memory touched past the store.
             unsafe {
                 core::arch::asm!(
                     "mov dword ptr [{td} + {off}], {exited}",
