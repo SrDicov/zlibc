@@ -19,7 +19,7 @@
 //! never takes the stdio lock), so no deadlock cycle exists.
 
 use core::ffi::{c_char, c_int, c_void};
-use core::ptr::{addr_of_mut, null, null_mut};
+use core::ptr::{addr_of_mut, null_mut};
 
 use crate::errno::__errno_location;
 use crate::malloc::{free, malloc};
@@ -509,7 +509,6 @@ pub unsafe extern "C" fn fwrite(p: *const c_void, size: usize, n: usize, f: *mut
                 ok = write_all(f, src, left);
                 if ok {
                     done += left;
-                    left = 0;
                 }
                 break;
             }
@@ -608,6 +607,10 @@ pub unsafe extern "C" fn fgetc(f: *mut File) -> c_int {
 }
 
 /// `fgetc(stdin)`.
+///
+/// # Safety
+///
+/// Reads fd 0 through the standard stream; same contract as [`fgetc`].
 #[no_mangle]
 pub unsafe extern "C" fn getchar() -> c_int {
     unsafe {
@@ -788,8 +791,23 @@ macro_rules! va_trampoline {
     };
 }
 
+/// C-variadic `printf` (naked tag builder; see macro docs).
+///
+/// # Safety
+///
+/// `fmt` valid, trailing args matching it.
 va_trampoline!(printf, printf_inner, 8, "lea rsi, [rsp+176]");
+/// C-variadic `fprintf`.
+///
+/// # Safety
+///
+/// `f` live, `fmt` valid, trailing args matching it.
 va_trampoline!(fprintf, fprintf_inner, 16, "lea rdx, [rsp+176]");
+/// C-variadic `snprintf`.
+///
+/// # Safety
+///
+/// `s` writable for `n` bytes, `fmt` valid, trailing args matching it.
 va_trampoline!(snprintf, snprintf_inner, 24, "lea rcx, [rsp+176]");
 
 /// `printf` body: stdout + caller-built tag (see [`va_trampoline`]).
@@ -908,86 +926,155 @@ fn parse_uint(fmt: *const u8, pos: &mut usize) -> usize {
     v
 }
 
-/// Format one conversion; `spec` selects. Returns through `out`;
-/// reads exactly the args it needs from the walker.
-unsafe fn convert(
-    out: &mut Out,
+/// One parsed conversion (driver → convert, single argument).
+struct Spec {
     spec: u8,
     flags: u8,
     width: usize,
     prec: isize,
-    uval: u64,
-    sval: i64,
-    neg: bool,
-    word: *const u8,
-    wlen: usize,
     wide: u8,
-    ap: &mut Ap,
-) {
+    narrow: u8,
+}
+
+/// Integer render request (convert → int_emit, single argument).
+struct Num {
+    base: u32,
+    upper: bool,
+    neg: bool,
+    flags: u8,
+    width: usize,
+    prec: isize,
+}
+
+/// Format one conversion; pulls exactly the args it needs from the
+/// walker. Returns through `out`.
+unsafe fn convert(out: &mut Out, sp: &Spec, ap: &mut Ap) {
     // Flags: bit0 '-', bit1 '+', bit2 ' ', bit3 '0', bit4 '#'.
     unsafe {
-        match spec {
+        match sp.spec {
             b'd' | b'i' => {
-                let mag = if neg { (0u64).wrapping_sub(uval) } else { uval };
-                int_emit(out, mag, 10, false, neg, flags, width, prec);
-            }
-            b'u' => int_emit(out, uval, 10, false, false, flags, width, prec),
-            b'o' => int_emit(out, uval, 8, false, false, flags, width, prec),
-            b'x' | b'X' | b'p' => {
-                let up = spec == b'X';
-                let mut fl = flags;
-                let v = if spec == b'p' {
-                    fl |= 0x30;
-                    ap.gp() as u64
+                let (uval, neg) = if sp.wide == 1 {
+                    let v = ap.gp() as i64;
+                    (v as u64, v < 0)
                 } else {
-                    uval
+                    let v = ap.gp() as c_int;
+                    (v as u64, v < 0)
                 };
-                int_emit(out, v, 16, up, false, fl, width, prec);
+                let mag = if neg { (0u64).wrapping_sub(uval) } else { uval };
+                int_emit(
+                    out,
+                    &Num {
+                        base: 10,
+                        upper: false,
+                        neg,
+                        flags: sp.flags,
+                        width: sp.width,
+                        prec: sp.prec,
+                    },
+                    mag,
+                );
+            }
+            b'u' => {
+                let uval = if sp.wide == 1 { ap.gp() } else { ap.gp() & 0xffff_ffff };
+                int_emit(
+                    out,
+                    &Num {
+                        base: 10,
+                        upper: false,
+                        neg: false,
+                        flags: sp.flags,
+                        width: sp.width,
+                        prec: sp.prec,
+                    },
+                    uval,
+                );
+            }
+            b'o' => {
+                let uval = if sp.wide == 1 { ap.gp() } else { ap.gp() & 0xffff_ffff };
+                int_emit(
+                    out,
+                    &Num {
+                        base: 8,
+                        upper: false,
+                        neg: false,
+                        flags: sp.flags,
+                        width: sp.width,
+                        prec: sp.prec,
+                    },
+                    uval,
+                );
+            }
+            b'x' | b'X' | b'p' => {
+                let upper = sp.spec == b'X';
+                let mut fl = sp.flags;
+                let v = if sp.spec == b'p' {
+                    fl |= 0x30;
+                    ap.gp()
+                } else if sp.wide == 1 {
+                    ap.gp()
+                } else {
+                    ap.gp() & 0xffff_ffff
+                };
+                int_emit(
+                    out,
+                    &Num {
+                        base: 16,
+                        upper,
+                        neg: false,
+                        flags: fl,
+                        width: sp.width,
+                        prec: sp.prec,
+                    },
+                    v,
+                );
             }
             b's' => {
-                let mut s = if word.is_null() {
+                let raw = ap.gp() as *const c_char as *const u8;
+                let mut s = if raw.is_null() {
                     &b"(null)"[..]
                 } else {
-                    core::slice::from_raw_parts(word, wlen)
+                    let mut len = 0usize;
+                    while *raw.add(len) != 0 {
+                        len += 1;
+                    }
+                    core::slice::from_raw_parts(raw, len)
                 };
-                if prec >= 0 && (prec as usize) < s.len() {
-                    s = &s[..prec as usize];
+                if sp.prec >= 0 && (sp.prec as usize) < s.len() {
+                    s = &s[..sp.prec as usize];
                 }
-                let pad = width.saturating_sub(s.len());
-                if flags & 1 == 0 {
+                let pad = sp.width.saturating_sub(s.len());
+                if sp.flags & 1 == 0 {
                     out.pad(b' ', pad);
                 }
                 out.emit(s);
-                if flags & 1 != 0 {
+                if sp.flags & 1 != 0 {
                     out.pad(b' ', pad);
                 }
-                let _ = sval;
             }
             b'c' => {
-                let b = uval as u8;
-                if flags & 1 == 0 {
-                    out.pad(b' ', width.saturating_sub(1));
+                let b = ap.gp() as u8;
+                if sp.flags & 1 == 0 {
+                    out.pad(b' ', sp.width.saturating_sub(1));
                 }
                 out.emit(&[b]);
-                if flags & 1 != 0 {
-                    out.pad(b' ', width.saturating_sub(1));
+                if sp.flags & 1 != 0 {
+                    out.pad(b' ', sp.width.saturating_sub(1));
                 }
-                let _ = sval;
             }
             _ => {
                 // Floats (`f e g a`, upper too): consume, emit nothing.
                 // `L` is the 16-byte SysV MEMORY class, the rest XMM slots.
-                if matches!(spec, b'f' | b'F' | b'e' | b'E' | b'g' | b'G' | b'a' | b'A') {
-                    if wide == 2 {
+                if matches!(sp.spec, b'f' | b'F' | b'e' | b'E' | b'g' | b'G' | b'a' | b'A')
+                {
+                    if sp.wide == 2 {
                         ap.stk16();
                     } else {
                         ap.fp_skip();
                     }
                 } else {
                     // Unknown spec: echo deterministically, never crash.
-                    out.emit(&[spec]);
+                    out.emit(&[sp.spec]);
                 }
-                let _ = (uval, sval, word, wlen, neg);
             }
         }
     }
@@ -995,32 +1082,23 @@ unsafe fn convert(
 
 /// `%n` needs the destination pointer, which `convert` does not carry —
 /// handled inline in the driver below.
-fn int_emit(
-    out: &mut Out,
-    mut v: u64,
-    base: u32,
-    upper: bool,
-    neg: bool,
-    flags: u8,
-    width: usize,
-    prec: isize,
-) {
-    let digits = if upper {
+fn int_emit(out: &mut Out, n: &Num, mut v: u64) {
+    let digits = if n.upper {
         &b"0123456789ABCDEF"[..]
     } else {
         &b"0123456789abcdef"[..]
     };
     let mut tmp = [0u8; 64];
     let mut len = 0usize;
-    if v == 0 && prec != 0 {
+    if v == 0 && n.prec != 0 {
         tmp[63] = b'0';
         len = 1;
     } else {
         let mut k = 64usize;
         while v > 0 {
             k -= 1;
-            tmp[k] = digits[(v % base as u64) as usize];
-            v /= base as u64;
+            tmp[k] = digits[(v % n.base as u64) as usize];
+            v /= n.base as u64;
             len += 1;
         }
         debug_assert!(k + len == 64);
@@ -1028,42 +1106,42 @@ fn int_emit(
     // Digits land backwards from the tail; `num` borrows them in place.
     let num = &tmp[64 - len..];
     let zero = len == 0 || (len == 1 && tmp[63] == b'0');
-    let zeros = if prec > len as isize {
-        (prec as usize) - len
+    let zeros = if n.prec > len as isize {
+        (n.prec as usize) - len
     } else {
         0
     };
     let mut sign = 0u8;
     let mut signlen = 0usize;
-    if neg {
+    if n.neg {
         sign = b'-';
         signlen = 1;
-    } else if base == 10 && flags & 2 != 0 {
+    } else if n.base == 10 && n.flags & 2 != 0 {
         sign = b'+';
         signlen = 1;
-    } else if base == 10 && flags & 4 != 0 {
+    } else if n.base == 10 && n.flags & 4 != 0 {
         sign = b' ';
         signlen = 1;
     }
     let mut alt = 0usize;
     // `0x` only for nonzero values (`%p` forces it via bit 0x20); `%#o`
     // forces a single `0` exactly when the digits show none (musl rules).
-    if flags & 0x10 != 0 && base == 16 && (!zero || flags & 0x20 != 0) {
+    if n.flags & 0x10 != 0 && n.base == 16 && (!zero || n.flags & 0x20 != 0) {
         alt = 2; // `0x`
     }
-    let force_zero = base == 8 && flags & 0x10 != 0 && zero;
+    let force_zero = n.base == 8 && n.flags & 0x10 != 0 && zero;
     // `0` flag pads with zeros after sign/alt (ignored with precision or `-`).
-    let zpad = flags & 8 != 0 && flags & 1 == 0 && prec < 0;
+    let zpad = n.flags & 8 != 0 && n.flags & 1 == 0 && n.prec < 0;
     let body = signlen + alt + zeros + len + if force_zero { 1 } else { 0 };
-    let pad = width.saturating_sub(body);
-    if !zpad && flags & 1 == 0 {
+    let pad = n.width.saturating_sub(body);
+    if !zpad && n.flags & 1 == 0 {
         out.pad(b' ', pad);
     }
     if signlen > 0 {
         out.emit(&[sign]);
     }
     if alt == 2 {
-        out.emit(if upper { &b"0X"[..] } else { &b"0x"[..] });
+        out.emit(if n.upper { &b"0X"[..] } else { &b"0x"[..] });
     }
     if zpad {
         out.pad(b'0', pad);
@@ -1073,7 +1151,7 @@ fn int_emit(
     }
     out.pad(b'0', zeros);
     out.emit(num);
-    if flags & 1 != 0 {
+    if n.flags & 1 != 0 {
         out.pad(b' ', pad);
     }
 }
@@ -1117,7 +1195,7 @@ unsafe fn fmt_driver(sink: &mut Sink, fmt: *const c_char, mut ap: Ap) -> c_int {
                 }
                 i += 1;
             }
-            let mut width = 0usize;
+            let width: usize;
             if *f.add(i) == b'*' {
                 let w = ap.gp() as c_int;
                 if w < 0 {
@@ -1203,40 +1281,15 @@ unsafe fn fmt_driver(sink: &mut Sink, fmt: *const c_char, mut ap: Ap) -> c_int {
                 continue;
             }
             // Pull the value arg (strings/pointers read raw, never as int).
-            let (uval, sval, neg, word, wlen) = match spec {
-                b's' => {
-                    let s = ap.gp() as *const c_char as *const u8;
-                    let mut len = 0usize;
-                    if !s.is_null() {
-                        while *s.add(len) != 0 {
-                            len += 1;
-                        }
-                    }
-                    (0, 0, false, s, len)
-                }
-                b'c' => (ap.gp() & 0xff, 0, false, null(), 0),
-                b'p' => (0, 0, false, null(), 0),
-                b'd' | b'i' => {
-                    if wide == 1 {
-                        let v = ap.gp() as i64;
-                        (v as u64, v, v < 0, null(), 0)
-                    } else {
-                        let v = ap.gp() as c_int;
-                        (v as u64, v as i64, v < 0, null(), 0)
-                    }
-                }
-                b'f' | b'F' | b'e' | b'E' | b'g' | b'G' | b'a' | b'A' => (0, 0, false, null(), 0),
-                _ => {
-                    if wide == 1 {
-                        (ap.gp(), 0, false, null(), 0)
-                    } else {
-                        (ap.gp() & 0xffff_ffff, 0, false, null(), 0)
-                    }
-                }
+            let sp = Spec {
+                spec,
+                flags,
+                width,
+                prec,
+                wide,
+                narrow,
             };
-            convert(
-                &mut out, spec, flags, width, prec, uval, sval, neg, word, wlen, wide, &mut ap,
-            );
+            convert(&mut out, &sp, &mut ap);
             if out.failed {
                 return -1;
             }
@@ -1337,8 +1390,8 @@ mod tests {
 
     use crate::syscall::{syscall2, syscall_ret};
 
-    /// Our own C-variadic symbols (naked trampolines): foreign `...`
-    /// declarations are stable to *call*; only *reading* needs nightly.
+    // Our own C-variadic symbols (naked trampolines): foreign `...`
+    // declarations are stable to *call*; only *reading* needs nightly.
     extern "C" {
         fn printf(fmt: *const c_char, ...) -> c_int;
         fn fprintf(f: *mut super::File, fmt: *const c_char, ...) -> c_int;
