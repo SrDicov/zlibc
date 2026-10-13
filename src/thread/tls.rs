@@ -158,6 +158,8 @@ pub(crate) fn ensure_main_tp() {
         (*td).head.prev = td.cast::<PthreadHead>();
         (*td).head.next = td.cast::<PthreadHead>();
         (*td).detach_state = AtomicI32::new(super::DT_JOINABLE);
+        (*td).errno_val = 0;
+        (*td).magic = super::THREAD_MAGIC;
         core::ptr::addr_of_mut!(MAIN_DTV).cast::<usize>().write(0);
         let tid = syscall1(
             SYS_SET_TID_ADDRESS,
