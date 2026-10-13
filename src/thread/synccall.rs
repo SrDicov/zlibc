@@ -508,6 +508,12 @@ mod tests {
     /// # Safety
     ///
     /// Runs only as a signal handler; touches one static counter.
+    ///
+    /// NOTE (diagnostic): address taken via direct `as usize`, NOT via
+    /// `as *const ()` — the latter left no `probe_handler` symbol in the
+    /// binary (verified with `nm`), so this tests whether the
+    /// intermediate pointer cast miscompiles the address away.
+    #[allow(clippy::function_casts_as_integer)]
     unsafe extern "C" fn probe_handler(_sig: c_int) {
         PROBE_HIT.store(1, Ordering::SeqCst);
     }
@@ -565,7 +571,7 @@ mod tests {
         const SYS_GETTID: usize = 186; // TODO: share with sync.rs
         unsafe {
             let act = KernelSigaction {
-                handler: probe_handler as *const () as usize,
+                handler: probe_handler as usize,
                 flags: 0,
                 restorer: 0,
                 mask: 0,
