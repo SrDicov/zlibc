@@ -821,12 +821,7 @@ unsafe fn fprintf_inner(f: *mut File, fmt: *const c_char, tag: *mut VaList) -> c
 /// # Safety
 ///
 /// `s` writable for `n` bytes; otherwise like [`printf_inner`].
-unsafe fn snprintf_inner(
-    s: *mut c_char,
-    n: usize,
-    fmt: *const c_char,
-    tag: *mut VaList,
-) -> c_int {
+unsafe fn snprintf_inner(s: *mut c_char, n: usize, fmt: *const c_char, tag: *mut VaList) -> c_int {
     unsafe { vsnprintf(s, n, fmt, tag) }
 }
 
@@ -1472,7 +1467,10 @@ mod tests {
             // fprintf through its trampoline, end to end over a pipe.
             let (r, w) = new_pipe();
             let wf = fdopen(w, c"w".as_ptr());
-            assert_eq!(fprintf(wf, c"%s=%d\n".as_ptr(), c"k".as_ptr(), 7 as c_int), 4);
+            assert_eq!(
+                fprintf(wf, c"%s=%d\n".as_ptr(), c"k".as_ptr(), 7 as c_int),
+                4
+            );
             assert_eq!(fclose(wf), 0);
             let rf = fdopen(r, c"r".as_ptr());
             let mut back = [0u8; 8];
