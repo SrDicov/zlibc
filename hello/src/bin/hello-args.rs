@@ -19,16 +19,19 @@ extern "C" {
 }
 
 /// Env lookup over raw envp (kept local: one test needs no lib surface).
-unsafe fn getenv(envp: *mut *mut c_char, key: &[u8]) -> *const c_char {
+/// Pointer + length (never a slice): this binary avoids every construct
+/// the sibling bins do not use, keeping the three binaries structurally
+/// identical for the toolchain.
+unsafe fn getenv(envp: *mut *mut c_char, key: *const u8, klen: usize) -> *const c_char {
     unsafe {
         let mut k = 0isize;
         while !(*envp.offset(k)).is_null() {
             let s = *envp.offset(k) as *const u8;
             let mut j = 0usize;
-            while j < key.len() && *s.add(j) == key[j] {
+            while j < klen && *s.add(j) == *key.add(j) {
                 j += 1;
             }
-            if j == key.len() && *s.add(j) == b'=' {
+            if j == klen && *s.add(j) == b'=' {
                 return s.add(j + 1) as *const c_char;
             }
             k += 1;
@@ -47,7 +50,7 @@ pub extern "C" fn main(argc: c_int, argv: *mut *mut c_char, envp: *mut *mut c_ch
             printf(c"argv=%s\n".as_ptr(), *argv.offset(i));
             i += 1;
         }
-        printf(c"env=%s\n".as_ptr(), getenv(envp, b"TEST_MARKER"));
+        printf(c"env=%s\n".as_ptr(), getenv(envp, b"TEST_MARKER".as_ptr(), 11));
         0
     }
 }
