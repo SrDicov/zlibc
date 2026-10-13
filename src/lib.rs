@@ -10,6 +10,7 @@ pub mod abi;
 pub mod errno;
 pub mod futex;
 pub mod ldso;
+pub mod libm;
 pub mod mem;
 pub mod panic;
 pub mod start;
