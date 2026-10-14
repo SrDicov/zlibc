@@ -685,48 +685,49 @@ mod tests {
     /// A second free of one object aborts instead of hanging `take` on
     /// a closed cycle (the heap stays consistent: detection precedes
     /// any link write, and the lock is released before panicking).
-    /// `extern "C"` cannot unwind, so death is asserted out-of-process.
+    /// `extern "C"` cannot unwind, so death is asserted out-of-process:
+    /// same test, child role under `ZLIBC_DEATH`.
     #[test]
-    fn double_free_dies() {
+    fn double_free_aborts() {
+        if std::env::var("ZLIBC_DEATH").is_ok() {
+            unsafe {
+                let p = malloc(64);
+                assert!(!p.is_null());
+                free(p);
+                free(p);
+            }
+            unreachable!("survived double free");
+        }
         let me = std::env::current_exe().unwrap();
         let st = std::process::Command::new(me)
+            .env("ZLIBC_DEATH", "1")
             .arg("--exact")
-            .arg("malloc::tests::double_free_death")
+            .arg("malloc::tests::double_free_aborts")
             .arg("--test-threads=1")
             .status()
             .unwrap();
         assert!(!st.success());
-    }
-
-    #[test]
-    fn double_free_death() {
-        unsafe {
-            let p = malloc(64);
-            assert!(!p.is_null());
-            free(p);
-            free(p);
-        }
     }
 
     /// A stack address is not heap memory: clean abort, no corruption.
     #[test]
-    fn foreign_free_dies() {
+    fn foreign_free_aborts() {
+        if std::env::var("ZLIBC_DEATH").is_ok() {
+            let mut x = [0u8; 64];
+            unsafe {
+                free(x.as_mut_ptr() as *mut core::ffi::c_void);
+            }
+            unreachable!("survived foreign free");
+        }
         let me = std::env::current_exe().unwrap();
         let st = std::process::Command::new(me)
+            .env("ZLIBC_DEATH", "1")
             .arg("--exact")
-            .arg("malloc::tests::foreign_free_death")
+            .arg("malloc::tests::foreign_free_aborts")
             .arg("--test-threads=1")
             .status()
             .unwrap();
         assert!(!st.success());
-    }
-
-    #[test]
-    fn foreign_free_death() {
-        let mut x = [0u8; 64];
-        unsafe {
-            free(x.as_mut_ptr() as *mut core::ffi::c_void);
-        }
     }
 
     /// Absurd alignments fail clean (NULL), never under-aligned.
