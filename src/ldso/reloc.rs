@@ -104,8 +104,8 @@ pub fn set_static_tls_cnt(n: usize) {
 
 // ---- r_info field extraction (musl dynlink.h:21-22, 64-bit arms) -----------
 
-fn r_type(info: usize) -> u32 {
-    (info & 0x7fff_ffff) as u32
+pub(crate) fn r_type(info: usize) -> u32 {
+    (info & 0xffff_ffff) as u32
 }
 
 fn r_sym(info: usize) -> u32 {
@@ -202,11 +202,15 @@ unsafe fn fatal(dso: *const c_char, sym: *const c_char, detail: &[u8]) -> ! {
 
 // ---- TLSDESC placeholder ----------------------------------------------------
 
-/// Placeholder address stored in static-TLS `TLSDESC` slot 0 until C1
-/// provides the real `__tlsdesc_static` (musl `src/ldso/x86_64/tlsdesc.s`).
-/// shortcut: stored, never called before a thread pointer exists.
+/// Loud abort for static-TLS `TLSDESC` slot 0 (musl resolves
+/// `__tlsdesc_static` from `src/ldso/x86_64/tlsdesc.s`): the old code
+/// stored a placeholder returning 0 into live slots, silently corrupting
+/// thread addresses. Any call reaching here traps instead of computing
+/// garbage; a real resolver replaces this when dynamic TLS grows one.
 extern "C" fn tlsdesc_static() -> isize {
-    0
+    unsafe {
+        core::arch::asm!("ud2", options(noreturn));
+    }
 }
 
 // ---- Symbol lookup (musl ldso/dynlink.c:265-351) ----------------------------
@@ -367,9 +371,12 @@ fn get_lfs64(_name: *const c_char) -> (*mut Dso, *mut Elf64Sym) {
 /// Addends: RELA takes `rel[2]`; REL `GOT`/`PLT`/`COPY` use 0, anything
 /// else re-reads `*reloc_addr`. `sym_index == 0` means "no symbol"
 /// (`RELATIVE`/`SYM_OR_REL` fall back to `base + addend`). `STB_LOCAL`
-/// resolves in place; otherwise [`find_sym`] runs from `dso` (see the
-/// module docs), then [`get_lfs64`]. Unresolved `PLT`/`GOT` with
-/// `dso->lazy` set are saved as `(off, info, addend)` triples for
+/// resolves in place; otherwise [`find_sym`] runs from `head` (the
+/// namespace start, so the executable interposes like musl — never from
+/// `dso` itself), then [`get_lfs64`]. `skip_relative` skips RELATIVE
+/// entries (6B self-image: `_dlstart` already applied them; musl skips
+/// `IS_RELATIVE` for `&ldso`, dynlink.c:400-408). Unresolved `PLT`/`GOT`
+/// with `dso->lazy` set are saved as `(off, info, addend)` triples for
 /// `redo_lazy_relocs` (`dynlink.c:439-446`, sized at `:2090-2105`).
 /// Anything else unresolved-and-not-weak-undef is fatal, as are
 /// initial-exec TLS resolving to a dynamic module and dynamic-DTV
@@ -377,18 +384,30 @@ fn get_lfs64(_name: *const c_char) -> (*mut Dso, *mut Elf64Sym) {
 ///
 /// # Safety
 ///
-/// `dso` must be valid with a mapped image at `base`; `rel` must hold
-/// `rel_size` bytes (an exact multiple of `stride` words) of table;
+/// `head` must start a valid `syms_next` chain; `dso` must be valid with
+/// a mapped image at `base`; `rel` must hold `rel_size` bytes (an exact
+/// multiple of `stride` words — debug-asserted, musl trusts the linker);
 /// `dso->lazy` (when set) must hold `lazy_cnt` triples plus whatever
 /// this call appends; `COPY` entries must reference a symbol; TLS
 /// entries must resolve (weak-undef TLS is a link error musl rejects
 /// too). Never call the fatal paths from tests: they exit the process.
-pub unsafe fn do_relocs(dso: *mut Dso, rel: *mut usize, rel_size: usize, stride: usize) {
+pub unsafe fn do_relocs(
+    head: *mut Dso,
+    dso: *mut Dso,
+    rel: *mut usize,
+    rel_size: usize,
+    stride: usize,
+    skip_relative: bool,
+) {
     unsafe {
         let base = (*dso).base;
         let syms = (*dso).syms;
         let strings = (*dso).strings;
         let step = stride.wrapping_mul(size_of::<usize>());
+        debug_assert!(
+            rel_size % step == 0,
+            "relocation table size must be a stride multiple"
+        );
         let mut p = rel;
         let mut left = rel_size;
         while left != 0 {
@@ -397,6 +416,12 @@ pub unsafe fn do_relocs(dso: *mut Dso, rel: *mut usize, rel_size: usize, stride:
             let ty = r_type(r_info);
             if ty == REL_NONE {
                 // musl dynlink.c:410: skip before touching the slot.
+                p = p.add(stride);
+                left -= step;
+                continue;
+            }
+            if skip_relative && ty == REL_RELATIVE {
+                // 6B self-image (see fn docs): already applied.
                 p = p.add(stride);
                 left -= step;
                 continue;
@@ -425,8 +450,9 @@ pub unsafe fn do_relocs(dso: *mut Dso, rel: *mut usize, rel_size: usize, stride:
                     def_dso = dso;
                     def_sym = s;
                 } else {
-                    // shortcut: chain starts at dso (no app head yet).
-                    (def_dso, def_sym) = find_sym(dso, name, ty == REL_PLT);
+                    // Namespace head first (musl interposition): an
+                    // executable definition wins over the DSO's own.
+                    (def_dso, def_sym) = find_sym(head, name, ty == REL_PLT);
                     if def_sym.is_null() {
                         (def_dso, def_sym) = get_lfs64(name);
                     }
@@ -449,6 +475,18 @@ pub unsafe fn do_relocs(dso: *mut Dso, rel: *mut usize, rel_size: usize, stride:
             } else {
                 def_dso = dso;
                 def_sym = core::ptr::null_mut();
+            }
+
+            // Weak-undef TLS with no definition is a link error (musl
+            // rejects it too): fail loud instead of null-dereferencing
+            // the arms below.
+            if def_sym.is_null()
+                && matches!(
+                    ty,
+                    REL_DTPMOD | REL_DTPOFF | REL_TPOFF | REL_TPOFF_NEG | REL_TLSDESC
+                )
+            {
+                fatal((*dso).name, name, b"tls symbol not found");
             }
 
             let sym_val = if def_sym.is_null() {
@@ -638,9 +676,11 @@ mod tests {
         unsafe {
             do_relocs(
                 &mut dso as *mut Dso,
+                &mut dso as *mut Dso,
                 rela.as_mut_ptr(),
                 3 * size_of::<usize>(),
                 3,
+                false,
             )
         };
         assert_eq!(unsafe { *at(base, 0x10) }, base as usize + 0x20);
@@ -671,9 +711,11 @@ mod tests {
         unsafe {
             do_relocs(
                 &mut dso as *mut Dso,
+                &mut dso as *mut Dso,
                 rela.as_mut_ptr(),
                 3 * size_of::<usize>(),
                 3,
+                false,
             )
         };
         assert_eq!(unsafe { *at(base, 0x08) }, base as usize + 0x20 + 5);
@@ -713,9 +755,11 @@ mod tests {
         unsafe {
             do_relocs(
                 &mut dso as *mut Dso,
+                &mut dso as *mut Dso,
                 rela.as_mut_ptr(),
                 6 * size_of::<usize>(),
                 3,
+                false,
             )
         };
         assert_eq!(unsafe { *at(base, 0x08) }, base as usize + 0x20 + 7);
@@ -761,9 +805,11 @@ mod tests {
         unsafe {
             do_relocs(
                 &mut dso as *mut Dso,
+                &mut dso as *mut Dso,
                 rela.as_mut_ptr(),
                 9 * size_of::<usize>(),
                 3,
+                false,
             )
         };
         assert_eq!(unsafe { *at(base, 0x08) }, 1);
@@ -799,9 +845,11 @@ mod tests {
         unsafe {
             do_relocs(
                 &mut dso as *mut Dso,
+                &mut dso as *mut Dso,
                 rela.as_mut_ptr(),
                 3 * size_of::<usize>(),
                 3,
+                false,
             )
         };
         let want_fn: usize = tlsdesc_static as *const () as usize;
@@ -831,9 +879,11 @@ mod tests {
         unsafe {
             do_relocs(
                 &mut dso as *mut Dso,
+                &mut dso as *mut Dso,
                 rela.as_mut_ptr(),
                 3 * size_of::<usize>(),
                 3,
+                false,
             )
         };
         assert_eq!(unsafe { *at(base, 0x18) }, 0x1234_5678);
@@ -865,9 +915,11 @@ mod tests {
         unsafe {
             do_relocs(
                 &mut dso as *mut Dso,
+                &mut dso as *mut Dso,
                 rela.as_mut_ptr(),
                 3 * size_of::<usize>(),
                 3,
+                false,
             )
         };
         assert_eq!(unsafe { *at(base, 0x08) }, 0x1122_3344_5566_7788);
@@ -895,9 +947,11 @@ mod tests {
         unsafe {
             do_relocs(
                 &mut dso as *mut Dso,
+                &mut dso as *mut Dso,
                 rela.as_mut_ptr(),
                 3 * size_of::<usize>(),
                 3,
+                false,
             )
         };
         let addr = base as usize + 0x08;
@@ -936,14 +990,113 @@ mod tests {
         unsafe {
             do_relocs(
                 &mut dso as *mut Dso,
+                &mut dso as *mut Dso,
                 rela.as_mut_ptr(),
                 6 * size_of::<usize>(),
                 3,
+                false,
             )
         };
         assert_eq!(dso.lazy_cnt, 2);
         assert_eq!(lazy, [0x08, i1, 9, 0x10, i2, 10, 0, 0]);
         assert_eq!(unsafe { *at(base, 0x08) }, 0xaaaa);
         assert_eq!(unsafe { *at(base, 0x10) }, 0xbbbb);
+    }
+
+    /// Lookup starts at the namespace head: an executable definition
+    /// interposes over the DSO's own (musl binding order).
+    #[test]
+    fn head_definition_interposes_over_dso_own() {
+        let mut exe_mem = [0u8; 64];
+        let mut lib_mem = [0u8; 64];
+        let exe_base = exe_mem.as_mut_ptr();
+        let lib_base = lib_mem.as_mut_ptr();
+        // exe defines "foo" @0x20; lib references it (undef) via GOT.
+        let mut exe_syms = [sym(0, 0, 0, 0, 0), sym(0, 0x12, 1, 0x20, 0)];
+        let mut exe_strs = *b"foo\0";
+        let mut exe_ht = [0u32; 5];
+        let mut lib_syms = [sym(0, 0, 0, 0, 0), sym(0, 0x12, 0, 0, 0)];
+        let mut lib_strs = *b"foo\0";
+        let mut lib_ht = [0u32; 5];
+        let mut exe: Dso = unsafe { core::mem::zeroed() };
+        let mut lib: Dso = unsafe { core::mem::zeroed() };
+        unsafe {
+            sysv_chain(exe_ht.as_mut_ptr(), 1);
+            sysv_chain(lib_ht.as_mut_ptr(), 1);
+            wire(
+                &mut exe as *mut Dso,
+                exe_base,
+                exe_syms.as_mut_ptr(),
+                exe_strs.as_mut_ptr() as *mut c_char,
+                exe_ht.as_mut_ptr(),
+            );
+            wire(
+                &mut lib as *mut Dso,
+                lib_base,
+                lib_syms.as_mut_ptr(),
+                lib_strs.as_mut_ptr() as *mut c_char,
+                lib_ht.as_mut_ptr(),
+            );
+            // Namespace: exe -> lib.
+            exe.syms_next = &mut lib as *mut Dso;
+            lib.syms_next = core::ptr::null_mut();
+        }
+        // lib's GOT reloc for "foo" binds exe's def, not lib's undef.
+        let mut rela = [0x08usize, info(1, REL_GOT), 7];
+        unsafe {
+            do_relocs(
+                &mut exe as *mut Dso,
+                &mut lib as *mut Dso,
+                rela.as_mut_ptr(),
+                3 * size_of::<usize>(),
+                3,
+                false,
+            )
+        };
+        assert_eq!(unsafe { *at(lib_base, 0x08) }, exe_base as usize + 0x20 + 7);
+    }
+
+    /// `skip_relative` leaves RELATIVE slots alone (6B self-image, which
+    /// `_dlstart` already relocated).
+    #[test]
+    fn skip_relative_leaves_relative_slots() {
+        let mut mem = [0u8; 64];
+        let base = mem.as_mut_ptr();
+        unsafe {
+            *at(base, 0x08) = 0xdead;
+        }
+        let mut dso: Dso = unsafe { core::mem::zeroed() };
+        dso.base = base;
+        let mut rela = [0x08usize, info(0, REL_RELATIVE), 0x20];
+        unsafe {
+            do_relocs(
+                &mut dso as *mut Dso,
+                &mut dso as *mut Dso,
+                rela.as_mut_ptr(),
+                3 * size_of::<usize>(),
+                3,
+                true,
+            )
+        };
+        assert_eq!(unsafe { *at(base, 0x08) }, 0xdead);
+    }
+
+    /// Corrupt table sizes fail loud in debug (musl trusts the linker;
+    /// release would wrap `left` and walk OOB instead).
+    #[test]
+    #[should_panic]
+    fn rel_size_must_be_stride_multiple() {
+        let mut dso: Dso = unsafe { core::mem::zeroed() };
+        let mut rela = [0usize; 4];
+        unsafe {
+            do_relocs(
+                &mut dso as *mut Dso,
+                &mut dso as *mut Dso,
+                rela.as_mut_ptr(),
+                4 * size_of::<usize>(),
+                3,
+                false,
+            )
+        };
     }
 }
