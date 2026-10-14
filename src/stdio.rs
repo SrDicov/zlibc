@@ -1617,10 +1617,16 @@ mod tests {
             let f1 = fdopen(sv[1], c"w+".as_ptr());
             assert!(!f0.is_null() && !f1.is_null());
             let msg = b"bothways";
-            assert_eq!(fwrite(msg.as_ptr() as *const _, 1, msg.len(), f0), msg.len());
+            assert_eq!(
+                fwrite(msg.as_ptr() as *const _, 1, msg.len(), f0),
+                msg.len()
+            );
             assert_eq!(fflush(f0), 0);
             let mut back = [0u8; 16];
-            assert_eq!(fread(back.as_mut_ptr() as *mut _, 1, back.len(), f1), msg.len());
+            assert_eq!(
+                fread(back.as_mut_ptr() as *mut _, 1, back.len(), f1),
+                msg.len()
+            );
             assert_eq!(&back[..msg.len()], msg);
             assert_eq!(fclose(f0), 0);
             assert_eq!(fclose(f1), 0);
