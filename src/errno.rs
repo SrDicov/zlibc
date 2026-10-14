@@ -14,23 +14,40 @@
 //!
 //! [`Thread`]: crate::thread::Thread
 
-use core::cell::UnsafeCell;
 use core::ffi::c_int;
 use core::mem::offset_of;
+use core::sync::atomic::{AtomicI32, Ordering};
 
-struct ErrnoCell(UnsafeCell<c_int>);
-
-/// `Sync` for the fallback cell: it is only shared by foreign threads,
-/// each of which uses it through an atomic-free but race-tolerant path —
-/// same exposure as musl's single-threaded `errno` before threads exist.
-/// Own threads never touch it (they own their cell).
-// SAFETY: foreign threads may race on it exactly like a pre-thread errno.
-unsafe impl Sync for ErrnoCell {}
-
-static ERRNO: ErrnoCell = ErrnoCell(UnsafeCell::new(0));
+/// Process-global fallback cell. An atomics cell (not a plain cell):
+/// foreign threads share it, so every access must be atomic in the Rust
+/// model; `Relaxed` compiles to the same plain `mov` musl emits, at zero
+/// cost. Own threads never touch it (they own their cell).
+static ERRNO: AtomicI32 = AtomicI32::new(0);
 
 fn global_errno() -> *mut c_int {
-    ERRNO.0.get()
+    &ERRNO as *const AtomicI32 as *mut c_int
+}
+
+/// Store through an errno pointer with the shared-cell discipline:
+/// `Relaxed` is exact on real hardware for both the atomic fallback and
+/// the plain per-thread cells behind the same pointer type.
+///
+/// # Safety
+///
+/// `p` must come from [`__errno_location`].
+pub(crate) unsafe fn errno_store(p: *mut c_int, v: c_int) {
+    unsafe {
+        (*p.cast::<AtomicI32>()).store(v, Ordering::Relaxed);
+    }
+}
+
+/// Load through an errno pointer (same discipline as [`errno_store`]).
+///
+/// # Safety
+///
+/// `p` must come from [`__errno_location`].
+pub(crate) unsafe fn errno_load(p: *mut c_int) -> c_int {
+    unsafe { (*p.cast::<AtomicI32>()).load(Ordering::Relaxed) }
 }
 
 /// Pointer to the calling thread's `errno` cell.
@@ -39,9 +56,13 @@ fn global_errno() -> *mut c_int {
 ///
 /// The pointer is valid for the program's lifetime. Own threads get
 /// their private cell; foreign threads share the fallback. Reading 8
-/// bytes at `FS + magic_offset` on a foreign thread only touches mapped
-/// TCB memory (never faults); a 2^-64 magic collision would merely
-/// alias one access, never corrupt control state.
+/// bytes at `FS + magic_offset` on a foreign thread touches mapped TCB
+/// memory in practice (glibc/musl TCBs are kilobytes); a foreign runtime
+/// with a sub-136-byte `FS` area would fault here — no user-space fault
+/// barrier exists, so the residual is documented, not fixed. (A self-word
+/// pre-check buys nothing: it faults on exactly the same mappings.) A
+/// 2^-64 magic collision would merely alias one access, never corrupt
+/// control state.
 #[no_mangle]
 pub unsafe extern "C" fn __errno_location() -> *mut c_int {
     #[cfg(target_arch = "x86_64")]
@@ -109,8 +130,8 @@ mod tests {
         unsafe {
             let p = super::__errno_location();
             CHILD_CELL.store(p as usize, Ordering::SeqCst);
-            *p = 7;
-            CHILD_SAW.store(*p as usize, Ordering::SeqCst);
+            super::errno_store(p, 7);
+            CHILD_SAW.store(super::errno_load(p) as usize, Ordering::SeqCst);
         }
         null_mut()
     }
@@ -125,7 +146,7 @@ mod tests {
         let mine = unsafe { super::__errno_location() };
         assert!(!mine.is_null());
         unsafe {
-            *mine = 0;
+            super::errno_store(mine, 0);
         }
         // A fresh host thread never ran our clone path: same global cell.
         let host_cell = std::thread::spawn(|| unsafe { super::__errno_location() } as usize)
@@ -141,6 +162,6 @@ mod tests {
         assert_eq!(unsafe { __pthread_join(td, null_mut()) }, 0);
         assert_eq!(CHILD_SAW.load(Ordering::SeqCst), 7);
         assert_ne!(CHILD_CELL.load(Ordering::SeqCst), mine as usize);
-        assert_eq!(unsafe { *mine }, 0);
+        assert_eq!(unsafe { super::errno_load(mine) }, 0);
     }
 }

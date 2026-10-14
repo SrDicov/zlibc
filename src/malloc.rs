@@ -266,13 +266,13 @@ unsafe fn give(ptr: *mut u8, len: usize) {
 
 fn set_oom() {
     unsafe {
-        *__errno_location() = ENOMEM;
+        crate::errno::errno_store(__errno_location(), ENOMEM);
     }
 }
 
 fn set_err(e: c_int) {
     unsafe {
-        *__errno_location() = e;
+        crate::errno::errno_store(__errno_location(), e);
     }
 }
 

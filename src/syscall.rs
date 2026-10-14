@@ -176,7 +176,7 @@ pub unsafe fn syscall6(
 pub unsafe fn syscall_ret(r: isize) -> isize {
     if (-4095..=-1).contains(&r) {
         unsafe {
-            *__errno_location() = (-r) as c_int;
+            crate::errno::errno_store(__errno_location(), (-r) as c_int);
         }
         -1
     } else {
@@ -269,7 +269,7 @@ mod tests {
         unsafe {
             assert_eq!(___errno_location(), crate::errno::__errno_location());
             assert_eq!(crate::syscall::syscall_ret(-2), -1);
-            assert_eq!(*crate::errno::__errno_location(), 2);
+            assert_eq!(crate::errno::errno_load(crate::errno::__errno_location()), 2);
             assert_eq!(crate::syscall::syscall_ret(7), 7);
         }
     }

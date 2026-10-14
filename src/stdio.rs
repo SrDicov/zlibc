@@ -153,7 +153,7 @@ unsafe fn ensure_locked() {
 
 fn set_err(e: c_int) {
     unsafe {
-        *__errno_location() = e;
+        crate::errno::errno_store(__errno_location(), e);
     }
 }
 
@@ -164,7 +164,7 @@ unsafe fn write_all(f: *mut File, mut p: *const u8, mut n: usize) -> bool {
         while n > 0 {
             let r = syscall_ret(syscall3(SYS_WRITE, (*f).fd as usize, p as usize, n));
             if r == -1 {
-                if *__errno_location() == EINTR {
+                if crate::errno::errno_load(__errno_location()) == EINTR {
                     continue;
                 }
                 if !f.is_null() {
@@ -241,7 +241,7 @@ unsafe fn fill_locked(f: *mut File) -> bool {
                 (*f).cap,
             ));
             if r == -1 {
-                if *__errno_location() == EINTR {
+                if crate::errno::errno_load(__errno_location()) == EINTR {
                     continue;
                 }
                 (*f).flags |= F_ERR;
@@ -864,7 +864,7 @@ impl<'a> Out<'a> {
                     while n > 0 {
                         let r = syscall_ret(syscall3(SYS_WRITE, fd as usize, p as usize, n));
                         if r == -1 {
-                            if *__errno_location() == EINTR {
+                            if crate::errno::errno_load(__errno_location()) == EINTR {
                                 continue;
                             }
                             self.failed = true;

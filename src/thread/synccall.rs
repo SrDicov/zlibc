@@ -294,7 +294,7 @@ unsafe extern "C" fn synccall_handler(_sig: c_int) {
         if core::ptr::addr_of!((*tp).tid).read() != TARGET_TID.load(Ordering::SeqCst) {
             return;
         }
-        let saved_errno = *crate::errno::__errno_location();
+        let saved_errno = crate::errno::errno_load(crate::errno::__errno_location());
         // Tell the caller we arrived, then wait for our turn to run.
         sem_post(&CALLER_SEM);
         sem_wait(&TARGET_SEM);
@@ -306,7 +306,7 @@ unsafe extern "C" fn synccall_handler(_sig: c_int) {
         sem_wait(&EXIT_SEM);
         // Tell the caller we are leaving; the wave state may be torn down.
         sem_post(&CALLER_SEM);
-        *crate::errno::__errno_location() = saved_errno;
+        crate::errno::errno_store(crate::errno::__errno_location(), saved_errno);
     }
 }
 
