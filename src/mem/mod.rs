@@ -1,12 +1,12 @@
-//! `memcpy`, `memmove`, `memset` with exact musl signatures.
+//! `memcpy`, `memmove`, `memset`, `memcmp` with exact musl signatures.
 //!
 //! Clean reimplementation — zero copied musl code. Behavior mirrors musl
-//! src/string/memcpy.c:5, src/string/memmove.c:13, src/string/memset.c:5
-//! and the declarations in musl include/string.h:27-29 (same signatures,
-//! same `dest` return, same overlap direction rule), but every body is a
-//! plain byte loop.
+//! src/string/memcpy.c:5, src/string/memmove.c:13, src/string/memset.c:5,
+//! src/string/memcmp.c (same signatures, same `dest` return, same
+//! overlap direction rule, same unsigned-byte ordering), but every body
+//! is a plain byte loop.
 //!
-//! Layout choice: one `mod.rs` for all three. They are 15-line siblings
+//! Layout choice: one `mod.rs` for all four. They are 15-line siblings
 //! with shared tests; per-function files would triple the file count for
 //! no readability gain.
 //!
@@ -102,6 +102,34 @@ pub unsafe extern "C" fn memset(dest: *mut c_void, c: c_int, n: usize) -> *mut c
     dest
 }
 
+/// musl `memcmp` (src/string/memcmp.c, declared include/string.h:30).
+///
+/// Compares `n` bytes as `unsigned char`, returning negative/zero/
+/// positive like the first differing pair (musl's `*a - *b` shape).
+/// Zero length compares nothing and returns 0.
+///
+/// # Safety
+///
+/// Both pointers must be valid for reads of `n` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn memcmp(s1: *const c_void, s2: *const c_void, n: usize) -> c_int {
+    // shortcut: byte loop; word-at-a-time like musl when measured.
+    unsafe {
+        let mut a = s1 as *const u8;
+        let mut b = s2 as *const u8;
+        let mut left = n;
+        while left > 0 {
+            if *a != *b {
+                return (*a as c_int) - (*b as c_int);
+            }
+            a = a.add(1);
+            b = b.add(1);
+            left -= 1;
+        }
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use core::ffi::c_void;
@@ -167,12 +195,60 @@ mod tests {
 
     /// Fills every byte, truncates `c` to `unsigned char`, returns `dest`.
     #[test]
-    fn memset_fill_and_truncation() {
-        let mut buf = [0u8; 16];
+    fn memset_fill_and_truncation() {        let mut buf = [0u8; 16];
         let ret = unsafe { crate::mem::memset(buf.as_mut_ptr() as *mut c_void, 0xab, 16) };
         assert_eq!(buf, [0xab; 16]);
         assert_eq!(ret as usize, buf.as_mut_ptr() as usize);
         unsafe { crate::mem::memset(buf.as_mut_ptr() as *mut c_void, 0x1ab, 4) };
         assert_eq!(&buf[..4], &[0xab; 4]);
+    }
+
+    /// Unsigned-byte ordering, sign of the first difference, zero length.
+    #[test]
+    fn memcmp_orders_and_zero_len() {
+        let a = *b"abc";
+        let b = *b"abd";
+        let c = *b"abb";
+        unsafe {
+            assert_eq!(
+                crate::mem::memcmp(
+                    a.as_ptr() as *const c_void,
+                    b.as_ptr() as *const c_void,
+                    3
+                ),
+                -1
+            );
+            assert!(crate::mem::memcmp(
+                b.as_ptr() as *const c_void,
+                a.as_ptr() as *const c_void,
+                3
+            ) > 0);
+            assert_eq!(
+                crate::mem::memcmp(
+                    a.as_ptr() as *const c_void,
+                    c.as_ptr() as *const c_void,
+                    3
+                ),
+                1
+            );
+            assert_eq!(
+                crate::mem::memcmp(
+                    a.as_ptr() as *const c_void,
+                    b.as_ptr() as *const c_void,
+                    0
+                ),
+                0
+            );
+            // High bytes compare unsigned (0xff > 0x01).
+            let hi = [0xffu8];
+            let lo = [0x01u8];
+            assert!(
+                crate::mem::memcmp(
+                    hi.as_ptr() as *const c_void,
+                    lo.as_ptr() as *const c_void,
+                    1
+                ) > 0
+            );
+        }
     }
 }
