@@ -261,7 +261,7 @@ unsafe fn fill_locked(f: *mut File) -> bool {
 /// Build a heap `File` over `fd` (lock held). Null on buffer OOM
 /// (musl fails the open too — an unbuffered fallback would silently
 /// break reads, which have nowhere to stage without a buffer).
-unsafe fn make_file(fd: c_int, read: bool) -> *mut File {
+unsafe fn make_file(fd: c_int, read: bool, write: bool) -> *mut File {
     unsafe {
         let f = malloc(size_of::<File>()) as *mut File;
         if f.is_null() {
@@ -273,7 +273,7 @@ unsafe fn make_file(fd: c_int, read: bool) -> *mut File {
             return null_mut();
         }
         (*f).fd = fd;
-        (*f).flags = (if read { F_READ } else { F_WRITE }) | F_OWNBUF;
+        (*f).flags = (if read { F_READ } else { 0 }) | (if write { F_WRITE } else { 0 }) | F_OWNBUF;
         (*f).line_buf = false;
         (*f).buf = buf;
         (*f).cap = STDIO_BUF;
@@ -384,7 +384,8 @@ pub unsafe extern "C" fn fopen(path: *const c_char, mode: *const c_char) -> *mut
         slock();
         ensure_locked();
         let read = (flags & O_WRONLY) == 0;
-        let f = make_file(fd as c_int, read);
+        let write = !read || plus;
+        let f = make_file(fd as c_int, read, write);
         if f.is_null() {
             let _ = syscall_ret(syscall3(SYS_CLOSE, fd as usize, 0, 0));
         }
@@ -407,14 +408,32 @@ pub unsafe extern "C" fn fdopen(fd: c_int, mode: *const c_char) -> *mut File {
             set_err(EINVAL);
             return null_mut();
         }
-        let read = *mode == (b'r' as c_char);
-        if !read && *mode != (b'w' as c_char) && *mode != (b'a' as c_char) {
-            set_err(EINVAL);
-            return null_mut();
+        let (mut read, mut write) = match *mode as u8 {
+            b'r' => (true, false),
+            b'w' | b'a' => (false, true),
+            _ => {
+                set_err(EINVAL);
+                return null_mut();
+            }
+        };
+        let mut m = mode.add(1);
+        while *m != 0 {
+            match *m as u8 {
+                b'+' => {
+                    read = true;
+                    write = true;
+                }
+                b'b' => {}
+                _ => {
+                    set_err(EINVAL);
+                    return null_mut();
+                }
+            }
+            m = m.add(1);
         }
         slock();
         ensure_locked();
-        let f = make_file(fd, read);
+        let f = make_file(fd, read, write);
         sunlock();
         f
     }
@@ -680,8 +699,8 @@ pub unsafe extern "C" fn puts(s: *const c_char) -> c_int {
 //
 // Stable Rust cannot `va_start` (nightly-only `c_variadic`), so varargs
 // are read by walking the x86_64 SysV `va_list` by hand: it is a plain
-// documented struct (GP slots below offset 48, XMM slots below 304,
-// overflow stack above), and every type we pull is ≤ 8 bytes at ≤ 8
+// documented struct (GP slots below offset 48, our 8 spilled XMM slots
+// below 176, overflow stack above), and every type we pull is ≤ 8 bytes at ≤ 8
 // alignment, which SysV always passes in plain slots. The `...` symbols
 // build the tag in a naked trampoline (spilling the caller's register
 // file exactly as compiler `va_start` would stage it); the `v*` family
@@ -720,11 +739,13 @@ impl Ap {
         }
     }
 
-    /// Skip one floating-point slot (floats ignored packet-wide).
+    /// Skip one floating-point slot (floats ignored packet-wide): the
+    /// trampoline spills exactly 8 XMM regs (offsets 48..176), so the
+    /// 9th double lives on the overflow stack like any stack arg.
     unsafe fn fp_skip(&mut self) {
         unsafe {
             let t = &mut *self.t;
-            if t.fp < 304 {
+            if t.fp < 176 {
                 t.fp += 16;
             } else {
                 t.overflow = t.overflow.add(8);
@@ -1385,10 +1406,11 @@ pub unsafe extern "C" fn vsnprintf(
 
 #[cfg(test)]
 mod tests {
-    use super::{fclose, fdopen, fgetc, fputs, fread, fwrite, Ap, VaList, EOF};
+    use super::{fclose, fdopen, fflush, fgetc, fputs, fread, fwrite, Ap, VaList, EOF};
     use core::ffi::{c_char, c_int};
     use core::ptr::null_mut;
 
+    use crate::net::{socketpair, AF_UNIX, SOCK_STREAM};
     use crate::syscall::{syscall2, syscall_ret};
 
     // Our own C-variadic symbols (naked trampolines): foreign `...`
@@ -1581,6 +1603,58 @@ mod tests {
             let ob = (*ap.t).overflow as usize;
             ap.stk16();
             assert_eq!((*ap.t).overflow as usize, ((ob + 15) & !15) + 16);
+        }
+    }
+
+    /// `w+` streams read back what they wrote (socketpair ends are
+    /// bidirectional; pipes are not, so this never worked through them).
+    #[test]
+    fn plus_mode_reads_and_writes() {
+        unsafe {
+            let mut sv = [0 as c_int; 2];
+            assert_eq!(socketpair(AF_UNIX, SOCK_STREAM, 0, sv.as_mut_ptr()), 0);
+            let f0 = fdopen(sv[0], c"w+".as_ptr());
+            let f1 = fdopen(sv[1], c"w+".as_ptr());
+            assert!(!f0.is_null() && !f1.is_null());
+            let msg = b"bothways";
+            assert_eq!(fwrite(msg.as_ptr() as *const _, 1, msg.len(), f0), msg.len());
+            assert_eq!(fflush(f0), 0);
+            let mut back = [0u8; 16];
+            assert_eq!(fread(back.as_mut_ptr() as *mut _, 1, back.len(), f1), msg.len());
+            assert_eq!(&back[..msg.len()], msg);
+            assert_eq!(fclose(f0), 0);
+            assert_eq!(fclose(f1), 0);
+        }
+    }
+
+    /// Nine doubles (one spilling to the stack) plus ints around them
+    /// stay aligned through the walker (GP/FP overflow interplay).
+    #[test]
+    fn nine_doubles_then_int_stays_aligned() {
+        unsafe {
+            let mut buf = [0u8; 128];
+            let rc = snprintf(
+                buf.as_mut_ptr() as *mut c_char,
+                buf.len(),
+                c"%d|%d|%d|%d|%f|%f|%f|%f|%f|%f|%f|%f|%f|%d".as_ptr(),
+                11 as c_int,
+                22 as c_int,
+                33 as c_int,
+                44 as c_int,
+                1.5f64,
+                2.5f64,
+                3.5f64,
+                4.5f64,
+                5.5f64,
+                6.5f64,
+                7.5f64,
+                8.5f64,
+                9.5f64,
+                99 as c_int,
+            );
+            let want: &[u8] = b"11|22|33|44||||||||||99";
+            assert_eq!(rc as usize, want.len());
+            assert_eq!(&buf[..want.len()], want);
         }
     }
 }

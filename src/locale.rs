@@ -27,9 +27,10 @@ pub const LC_MONETARY: c_int = 4;
 pub const LC_MESSAGES: c_int = 5;
 pub const LC_ALL: c_int = 6;
 const NCAT: usize = 6;
-/// Stored names are capped (musl keeps the full string; 15 chars + NUL
-/// covers every real-world locale tag — `shortcut:`, grow on demand).
-const NAME_CAP: usize = 16;
+/// Stored names are capped (musl keeps the full string; 63 chars + NUL
+/// covers every real-world locale tag with room — `shortcut:`, heap-store
+/// names if a longer tag ever appears in the wild).
+const NAME_CAP: usize = 64;
 
 /// Current name per category, NUL-terminated.
 static mut CURRENT: [[u8; NAME_CAP]; NCAT] = [[0; NAME_CAP]; NCAT];
