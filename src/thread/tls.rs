@@ -10,7 +10,7 @@
 
 use core::ffi::{c_int, c_void};
 use core::mem::size_of;
-use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicUsize, Ordering};
 
 use crate::abi::PthreadHead;
 use crate::ldso::dso::TlsModule;
@@ -22,10 +22,12 @@ use super::{Thread, ARCH_SET_FS, SYS_ARCH_PRCTL, SYS_SET_TID_ADDRESS};
 /// TCB alignment (musl `__init_tls.c:30-35`: `MIN_TLS_ALIGN`, 16 here).
 const TLS_ALIGN: usize = 16;
 
-/// Registered TLS modules (head) and count. Written only before threads
-/// exist (image load); read by create paths. No atomics needed yet.
-static mut TLS_HEAD: *mut TlsModule = core::ptr::null_mut();
-static mut TLS_CNT: usize = 0;
+/// Registered TLS modules (head) and count. Writers run only before
+/// threads exist (image load); readers run any time, so both go through
+/// atomics (`Acquire` reads pair with the `Release` writes below — the
+/// only cross-thread edge here; no concurrent writers exist by contract).
+static TLS_HEAD: AtomicPtr<TlsModule> = AtomicPtr::new(core::ptr::null_mut());
+static TLS_CNT: AtomicUsize = AtomicUsize::new(0);
 
 /// Register one static-TLS module record, lent by the loader (which owns
 /// the storage). Prepends to the list.
@@ -41,10 +43,9 @@ static mut TLS_CNT: usize = 0;
 // (`__init_tls.c:105-123`) moves here when ldso reports `PT_TLS`.
 pub unsafe fn register_tls_module(m: *mut TlsModule) {
     unsafe {
-        (*m).next = core::ptr::addr_of_mut!(TLS_HEAD).read();
-        core::ptr::addr_of_mut!(TLS_HEAD).write(m);
-        let n = core::ptr::addr_of_mut!(TLS_CNT).read();
-        core::ptr::addr_of_mut!(TLS_CNT).write(n + 1);
+        (*m).next = TLS_HEAD.load(Ordering::Acquire);
+        TLS_HEAD.store(m, Ordering::Release);
+        TLS_CNT.fetch_add(1, Ordering::Release);
     }
 }
 
@@ -53,7 +54,7 @@ pub unsafe fn register_tls_module(m: *mut TlsModule) {
 pub(crate) fn current_tls_size() -> usize {
     let mut size = 2 * size_of::<usize>() + size_of::<Thread>();
     unsafe {
-        let mut m = core::ptr::addr_of_mut!(TLS_HEAD).read();
+        let mut m = TLS_HEAD.load(Ordering::Acquire);
         while !m.is_null() {
             size = size.wrapping_add((*m).size).wrapping_add((*m).align);
             m = (*m).next;
@@ -82,7 +83,7 @@ pub(crate) unsafe fn copy_tls(base: *mut u8, size: usize) -> *mut Thread {
         mem &= !(TLS_ALIGN - 1);
         let td = mem as *mut Thread;
         let mut i = 1usize;
-        let mut m = core::ptr::addr_of_mut!(TLS_HEAD).read();
+        let mut m = TLS_HEAD.load(Ordering::Acquire);
         while !m.is_null() {
             // `DTP_OFFSET` is 0 on x86_64 (pthread_impl.h:113-115).
             dtv.add(i).write((td as usize).wrapping_sub((*m).offset));
@@ -94,7 +95,7 @@ pub(crate) unsafe fn copy_tls(base: *mut u8, size: usize) -> *mut Thread {
             i += 1;
             m = (*m).next;
         }
-        dtv.write(core::ptr::addr_of_mut!(TLS_CNT).read());
+        dtv.write(TLS_CNT.load(Ordering::Acquire));
         (*td).head.this = td.cast::<PthreadHead>();
         (*td).head.dtv = dtv;
         // shortcut(no thread list): musl links every thread into a global
@@ -138,9 +139,12 @@ static mut MAIN_TID_CLEAR: c_int = 0;
 /// (musl `__init_tp`, `__init_tls.c:14-28`, reduced: self-assign, SET_FS,
 /// joinable state, TID via `set_tid_address`, self-list; locale/robust/
 /// sysinfo/canary come with their owning waves — shortcut).
-/// Idempotent: the first caller wins, later callers are already covered.
+/// Convergent: whoever arrives first initializes (idempotent writes),
+/// then publishes with `Release`; latecomers observe it via `Acquire`
+/// and return. The `swap`-first shape used to publish before the init
+/// completed, exposing a half-built TCB.
 pub(crate) fn ensure_main_tp() {
-    if DONE.swap(true, Ordering::SeqCst) {
+    if DONE.load(Ordering::Acquire) {
         return;
     }
     // shortcut(hosted guest): a freestanding boot always sees FS == 0
@@ -170,5 +174,6 @@ pub(crate) fn ensure_main_tp() {
         // musl ignores a zero return (`__init_tls.c:18-20` checks `< 0`,
         // and failure here always means a kernel bug).
         let _ = set_tp(td as usize);
+        DONE.store(true, Ordering::Release);
     }
 }
