@@ -70,11 +70,23 @@ pub(crate) unsafe fn find_auxv(sp: *const usize) -> *const usize {
 /// over writable mappings of the stated sizes.
 pub(crate) unsafe fn relocate_self(base: usize, dynt: &[usize; DYN_CNT]) {
     unsafe {
+        debug_assert!(
+            dynt[DT_RELSZ].is_multiple_of(2 * size_of::<usize>()),
+            "REL table size must be a stride multiple"
+        );
+        debug_assert!(
+            dynt[DT_RELASZ].is_multiple_of(3 * size_of::<usize>()),
+            "RELA table size must be a stride multiple"
+        );
+        debug_assert!(
+            dynt[DT_RELRSZ].is_multiple_of(size_of::<usize>()),
+            "RELR table size must be a word multiple"
+        );
         // REL, stride 2 (dlstart.c:128-134).
         let mut p = base.wrapping_add(dynt[DT_REL]) as *mut usize;
         let mut left = dynt[DT_RELSZ];
         while left > 0 {
-            if (*p.add(1) & 0xffff_ffff) as u32 == R_RELATIVE {
+            if super::reloc::r_type(*p.add(1)) == R_RELATIVE {
                 let slot = base.wrapping_add(*p) as *mut usize;
                 *slot = (*slot).wrapping_add(base);
             }
@@ -85,7 +97,7 @@ pub(crate) unsafe fn relocate_self(base: usize, dynt: &[usize; DYN_CNT]) {
         let mut p = base.wrapping_add(dynt[DT_RELA]) as *mut usize;
         let mut left = dynt[DT_RELASZ];
         while left > 0 {
-            if (*p.add(1) & 0xffff_ffff) as u32 == R_RELATIVE {
+            if super::reloc::r_type(*p.add(1)) == R_RELATIVE {
                 let slot = base.wrapping_add(*p) as *mut usize;
                 *slot = base.wrapping_add(*p.add(2));
             }
@@ -177,19 +189,19 @@ pub unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usi
             j += 2;
         }
         // Bias (dlstart.c:104-115): `AT_BASE`, else `_DYNAMIC` minus the
-        // `PT_DYNAMIC` virtual address found by scanning `AT_PHDR`.
+        // `PT_DYNAMIC` virtual address, scanning backward like musl
+        // (dlstart.c:109) so the LAST `PT_DYNAMIC` wins.
         let mut base = aux[AT_BASE];
         if base == 0 {
-            let mut ph = aux[AT_PHDR] as *const Elf64Phdr;
             let mut k = aux[AT_PHNUM];
             let phent = aux[AT_PHENT];
             while k > 0 {
+                k -= 1;
+                let ph = (aux[AT_PHDR] as *const u8).add(k * phent) as *const Elf64Phdr;
                 if (*ph).p_type == PT_DYNAMIC {
                     base = (dynv as usize).wrapping_sub((*ph).p_vaddr as usize);
                     break;
                 }
-                ph = (ph as *const u8).add(phent) as *const Elf64Phdr;
-                k -= 1;
             }
         }
         relocate_self(base, &dynt);
@@ -237,16 +249,18 @@ mod tests {
         assert_eq!(base, 0x7f00_0000);
     }
 
-    /// Bias from the `AT_PHDR` scan (ldso-as-command, dlstart.c:105-115).
-    /// Synthetic stride 80 (musl follows `AT_PHENT` blindly, so does the
-    /// code under test — consistency, not the real 56, is what matters).
+    /// Bias from the `AT_PHDR` scan (ldso-as-command, dlstart.c:105-115):
+    /// musl scans backward and takes the LAST `PT_DYNAMIC`. Synthetic
+    /// stride 80 (musl follows `AT_PHENT` blindly, so does the code —
+    /// consistency, not the real 56, is what matters).
     #[test]
     fn bias_from_phdr_scan() {
-        // Two fake phdrs: PT_LOAD then PT_DYNAMIC with p_vaddr 0x2000.
+        // Two PT_DYNAMICs: the LAST one wins (musl walks backward).
         let mut phdrs = [0u64; 20];
-        phdrs[0] = 1; // p_type PT_LOAD
+        phdrs[0] = 2; // p_type PT_DYNAMIC
+        phdrs[2] = 0x1000; // p_vaddr (first, ignored)
         phdrs[10] = 2; // p_type PT_DYNAMIC
-        phdrs[12] = 0x2000; // p_vaddr
+        phdrs[12] = 0x2000; // p_vaddr (last, wins)
         let dynv = [DT_NULL, 0];
         let sp = fake_stack(&[
             AT_PHDR,
@@ -261,6 +275,15 @@ mod tests {
         // Point dynv at a real array; base must equal dynv - 0x2000.
         let base = unsafe { super::_dlstart_c(sp.as_ptr(), dynv.as_ptr()) };
         assert_eq!(base, dynv.as_ptr() as usize - 0x2000);
+    }
+
+    /// Corrupt table sizes fail loud in debug (musl trusts the linker).
+    #[test]
+    #[should_panic]
+    fn reloc_table_size_must_be_stride_multiple() {
+        let mut dynt = [0usize; DYN_CNT];
+        dynt[DT_RELASZ] = 1;
+        unsafe { relocate_self(0x10000, &dynt) };
     }
 
     /// REL/RELA/RELR RELATIVE-only application; other types skipped.

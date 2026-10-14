@@ -111,11 +111,13 @@ pub unsafe extern "C" fn _start() -> ! {
         "lea rsi, [rip + _DYNAMIC]",
         "and rsp, -16",
         "call _start_c",
+        "ud2",
     )
 }
 
 /// musl `_start_c` (crt/crt1.c:14-19): `argc = p[0]`, `argv = p+1`, then
-/// `__libc_start_main(main, argc, argv, _init, _fini, 0)`.
+/// `__libc_start_main(main, argc, argv, _init, _fini, 0)`. Diverges like
+/// its only caller promises (`_start` traps on fallthrough anyway).
 ///
 /// # Safety
 ///
@@ -123,10 +125,13 @@ pub unsafe extern "C" fn _start() -> ! {
 /// pointers, then `envp`, then auxv). Called once, from `_start`.
 #[cfg(not(test))]
 #[no_mangle]
-pub unsafe extern "C" fn _start_c(sp: *const c_long) {
+pub unsafe extern "C" fn _start_c(sp: *const c_long) -> ! {
     let argc = unsafe { sp.read() } as c_int;
     let argv = sp.wrapping_add(1) as *mut *mut c_char;
     unsafe { __libc_start_main(main, argc, argv, _init, _fini, core::ptr::null_mut()) };
+    loop {
+        core::hint::spin_loop();
+    }
 }
 
 /// musl `__libc_start_main` (src/env/__libc_start_main.c:72-87): derive
