@@ -685,9 +685,21 @@ mod tests {
     /// A second free of one object aborts instead of hanging `take` on
     /// a closed cycle (the heap stays consistent: detection precedes
     /// any link write, and the lock is released before panicking).
+    /// `extern "C"` cannot unwind, so death is asserted out-of-process.
     #[test]
-    #[should_panic(expected = "double free")]
-    fn double_free_aborts() {
+    fn double_free_dies() {
+        let me = std::env::current_exe().unwrap();
+        let st = std::process::Command::new(me)
+            .arg("--exact")
+            .arg("malloc::tests::double_free_death")
+            .arg("--test-threads=1")
+            .status()
+            .unwrap();
+        assert!(!st.success());
+    }
+
+    #[test]
+    fn double_free_death() {
         unsafe {
             let p = malloc(64);
             assert!(!p.is_null());
@@ -698,8 +710,19 @@ mod tests {
 
     /// A stack address is not heap memory: clean abort, no corruption.
     #[test]
-    #[should_panic(expected = "foreign pointer")]
-    fn foreign_free_aborts() {
+    fn foreign_free_dies() {
+        let me = std::env::current_exe().unwrap();
+        let st = std::process::Command::new(me)
+            .arg("--exact")
+            .arg("malloc::tests::foreign_free_death")
+            .arg("--test-threads=1")
+            .status()
+            .unwrap();
+        assert!(!st.success());
+    }
+
+    #[test]
+    fn foreign_free_death() {
         let mut x = [0u8; 64];
         unsafe {
             free(x.as_mut_ptr() as *mut core::ffi::c_void);
