@@ -293,7 +293,7 @@ unsafe fn give(ptr: *mut u8, len: usize) {
     unsafe {
         let mut c = addr_of_mut!(FREE_HEAD).read();
         while !c.is_null() {
-            if core::ptr::eq(c, ptr) {
+            if core::ptr::eq(c, ptr as *mut Chunk) {
                 unlock();
                 panic!("zlibc malloc: double free");
             }
