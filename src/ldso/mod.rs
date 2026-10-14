@@ -9,8 +9,8 @@
 //! `crate::syscall::SYS_WRITE` until they are generated from
 //! `arch/x86_64/bits/`.
 
-pub mod dso;
 pub mod dlstart;
+pub mod dso;
 pub mod reloc;
 
 use core::ffi::c_int;

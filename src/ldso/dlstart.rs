@@ -19,8 +19,8 @@
 //! the symbol.
 
 use super::{
-    Elf64Phdr, AT_BASE, AT_NULL, AT_PHENT, AT_PHNUM, AT_PHDR, AUX_CNT, DT_REL, DT_RELA, DT_RELR,
-    DT_RELRSZ, DT_RELASZ, DT_RELSZ, DYN_CNT, PT_DYNAMIC,
+    Elf64Phdr, AT_BASE, AT_NULL, AT_PHDR, AT_PHENT, AT_PHNUM, AUX_CNT, DT_REL, DT_RELA, DT_RELASZ,
+    DT_RELR, DT_RELRSZ, DT_RELSZ, DYN_CNT, PT_DYNAMIC,
 };
 use core::mem::size_of;
 
@@ -193,7 +193,7 @@ pub unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usi
 #[cfg(test)]
 mod tests {
     use super::{find_auxv, relocate_self, AT_BASE, AT_NULL, AT_PHDR, AT_PHENT, AT_PHNUM, DT_NULL};
-    use super::{DT_RELA, DT_RELASZ, DT_REL, DT_RELSZ, DT_RELR, DT_RELRSZ, DYN_CNT};
+    use super::{DT_REL, DT_RELA, DT_RELASZ, DT_RELR, DT_RELRSZ, DT_RELSZ, DYN_CNT};
     use core::mem::size_of;
 
     /// Fake kernel stack: argc, argv, NULL, env, NULL, auxv pairs.
