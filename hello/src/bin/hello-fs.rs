@@ -28,6 +28,10 @@ unsafe fn unlink(path: *const c_char) {
 }
 
 /// Application entry for our `_start_c` (exact signature it calls).
+///
+/// # Safety
+///
+/// Called once by our own `_start_c` with kernel-provided vectors.
 #[no_mangle]
 pub unsafe extern "C" fn main(
     _argc: c_int,
@@ -58,7 +62,7 @@ pub unsafe extern "C" fn main(
             return 1;
         }
         unlink(path);
-        if n != msg.len() || &back[..n] != &msg[..] {
+        if n != msg.len() || back[..n] != msg[..] {
             printf(c"mismatch\n".as_ptr());
             return 1;
         }
