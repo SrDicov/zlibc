@@ -195,7 +195,8 @@ mod tests {
 
     /// Fills every byte, truncates `c` to `unsigned char`, returns `dest`.
     #[test]
-    fn memset_fill_and_truncation() {        let mut buf = [0u8; 16];
+    fn memset_fill_and_truncation() {
+        let mut buf = [0u8; 16];
         let ret = unsafe { crate::mem::memset(buf.as_mut_ptr() as *mut c_void, 0xab, 16) };
         assert_eq!(buf, [0xab; 16]);
         assert_eq!(ret as usize, buf.as_mut_ptr() as usize);
@@ -211,32 +212,18 @@ mod tests {
         let c = *b"abb";
         unsafe {
             assert_eq!(
-                crate::mem::memcmp(
-                    a.as_ptr() as *const c_void,
-                    b.as_ptr() as *const c_void,
-                    3
-                ),
+                crate::mem::memcmp(a.as_ptr() as *const c_void, b.as_ptr() as *const c_void, 3),
                 -1
             );
-            assert!(crate::mem::memcmp(
-                b.as_ptr() as *const c_void,
-                a.as_ptr() as *const c_void,
-                3
-            ) > 0);
+            assert!(
+                crate::mem::memcmp(b.as_ptr() as *const c_void, a.as_ptr() as *const c_void, 3) > 0
+            );
             assert_eq!(
-                crate::mem::memcmp(
-                    a.as_ptr() as *const c_void,
-                    c.as_ptr() as *const c_void,
-                    3
-                ),
+                crate::mem::memcmp(a.as_ptr() as *const c_void, c.as_ptr() as *const c_void, 3),
                 1
             );
             assert_eq!(
-                crate::mem::memcmp(
-                    a.as_ptr() as *const c_void,
-                    b.as_ptr() as *const c_void,
-                    0
-                ),
+                crate::mem::memcmp(a.as_ptr() as *const c_void, b.as_ptr() as *const c_void, 0),
                 0
             );
             // High bytes compare unsigned (0xff > 0x01).
