@@ -269,7 +269,10 @@ mod tests {
         unsafe {
             assert_eq!(___errno_location(), crate::errno::__errno_location());
             assert_eq!(crate::syscall::syscall_ret(-2), -1);
-            assert_eq!(crate::errno::errno_load(crate::errno::__errno_location()), 2);
+            assert_eq!(
+                crate::errno::errno_load(crate::errno::__errno_location()),
+                2
+            );
             assert_eq!(crate::syscall::syscall_ret(7), 7);
         }
     }
