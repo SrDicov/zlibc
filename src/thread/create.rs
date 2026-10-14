@@ -67,6 +67,11 @@ fn tid_word(td: *mut Thread) -> *mut c_int {
 /// trap since the kernel only clobbers `rcx`/`r11`), `call`s it, and
 /// `exit`s with its return value — never returning here.
 ///
+/// Register discipline is honest: every register the body rewrites
+/// (`rsi`/`rdi`/`rdx`/`r8`/`r10`) is `inlateout`, and the trap-clobbered
+/// `rcx`/`r11` are declared `out` (the pre-`clone` values only the trap
+/// may read stay valid inputs).
+///
 /// # Safety
 ///
 /// `flags` must be a valid clone combination; `stack` must be the top of
@@ -110,12 +115,12 @@ unsafe fn raw_clone(
             "syscall",
             "ud2",
             "2:",
-            in("rdx") flags,
-            in("rsi") stack,
-            in("rcx") arg,
+            inlateout("rdx") flags,
+            inlateout("rsi") stack,
+            inlateout("rcx") arg,
             in("r9") func,
-            in("r8") ptid,
-            in("r10") tls,
+            inlateout("r8") ptid,
+            inlateout("r10") tls,
             ctid = in(reg) ctid,
             out("rax") ret,
             out("rdi") _,
@@ -174,6 +179,11 @@ unsafe extern "C" fn child_entry(arg: usize) -> c_int {
 /// Store discipline mirrors musl (plain store + wake trap as the
 /// barrier; TSO orders it before the traps). No ENOSYS fallback:
 /// `PRIVATE` needs 2.6.22+, like all of NPTL.
+///
+/// Keep the publish fused inside the trap block below: splitting the
+/// store out would reintroduce the unmap window the block closes. The
+/// `mov` formally aliases an `AtomicI32` store — operationally exact on
+/// TSO like musl, invisible to the model either way.
 #[cfg(target_arch = "x86_64")]
 unsafe fn thread_exit(td: *mut Thread, res: *mut c_void) -> ! {
     unsafe {
@@ -357,14 +367,27 @@ pub unsafe extern "C" fn __pthread_create(
         (*td).result = null_mut();
         (*td).start = start;
         (*td).arg = arg;
-        // create.c:328-329: the child inherits canary/sysinfo. The parent
-        // TP is always our Thread here (`ensure_main_tp` ran above).
+        // create.c:328-329: the child inherits canary/sysinfo from a
+        // proven-ours parent; a foreign TP (host glibc under test, or
+        // unset) contributes zeros instead of foreign bytes (same magic
+        // discipline as `errno.rs`).
         let parent = get_tp() as *mut Thread;
-        (*td).head.canary = (*parent).head.canary;
-        (*td).head.sysinfo = (*parent).head.sysinfo;
+        let ours = !parent.is_null() && unsafe { (*parent).magic == super::THREAD_MAGIC };
+        if ours {
+            unsafe {
+                (*td).head.canary = (*parent).head.canary;
+                (*td).head.sysinfo = (*parent).head.sysinfo;
+            }
+        } else {
+            (*td).head.canary = 0;
+            (*td).head.sysinfo = 0;
+        }
         let tid_cell = tid_word(td) as usize;
         // `ptid`+`ctid` share the tid word: the kernel reports the TID at
         // creation and clears it (futex wake) at thread exit.
+        // Register BEFORE clone (see `register_thread`): a detached child
+        // may die and unmap itself before `clone` returns to us.
+        super::synccall::register_thread(td);
         let r = raw_clone(
             CLONE_FLAGS,
             top,
@@ -375,10 +398,11 @@ pub unsafe extern "C" fn __pthread_create(
             td as usize,
         );
         if r < 0 {
+            // Never ran: unlink the pre-clone node, then free the stack.
+            super::synccall::unregister_thread(td);
             let _ = syscall_ret(syscall2(SYS_MUNMAP, base as usize, size));
             return EAGAIN;
         }
-        super::synccall::register_thread(td); // C3: link into the synccall registry.
         res.write(td as PthreadT);
         0
     }
