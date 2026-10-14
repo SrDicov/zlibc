@@ -405,7 +405,7 @@ pub unsafe fn do_relocs(
         let strings = (*dso).strings;
         let step = stride.wrapping_mul(size_of::<usize>());
         debug_assert!(
-            rel_size % step == 0,
+            rel_size.is_multiple_of(step),
             "relocation table size must be a stride multiple"
         );
         let mut p = rel;
