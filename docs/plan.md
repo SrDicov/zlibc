@@ -352,6 +352,18 @@ use-after-unmap nondeterminista.
   suite, fixed line-faithful to `dlstart.c`. Next: 6B link-map +
   cross-DSO lookup, 6C dynamic TLS, 6D lazy PLT + `libdl`, 6E musl-gcc
   gate.
+- **Audit batch (v0.11, all green, 73 tests):** three parallel audits,
+  every load-bearing finding fixed + tested — pre-clone registry link
+  (detached-child UAF), honest `raw_clone` clobbers, magic-gated canary,
+  DIAG-free wave handler, atomic errno fallback, malloc corruption
+  aborts (double/foreign, subprocess death tests) + arena checks +
+  1024-entry map, fp-walker 176 (proven by induction: the stack holds
+  only excess args), `w+` modes, `send`/`recv`, locale-64, ldso
+  `skip_relative`/head-interposition/TLS guards/stride guards/shared
+  `r_type`/`_start` sealed, convergent TLS init. Deliberate keeps:
+  fused exit store (operational safety over model nit), mid-live-chunk
+  frees (C-UB, documented), sub-136B foreign `FS` (no user barrier
+  exists).
 - **Wave 5** — a real binary on zlibc only. Packet 1 DONE (v0.5):
   `hello/` consumer crate (`panic=abort`, `-nostdlib` scoped from its
   own build script so host build tools keep working, `rust_eh_personality`
