@@ -117,7 +117,7 @@ pub(crate) unsafe fn relocate_self(base: usize, dynt: &[usize; DYN_CNT]) {
                     }
                     i += 1;
                 }
-                slot = slot.add(8 * size_of::<usize>() - 1);
+                slot = slot.add(usize::BITS as usize - 1);
             }
         }
     }
@@ -126,6 +126,11 @@ pub(crate) unsafe fn relocate_self(base: usize, dynt: &[usize; DYN_CNT]) {
 /// Entry for the kernel/`PT_INTERP` (musl `arch/x86_64/crt_arch.h:1-13`,
 /// translated to Intel asm like the rest of this codebase): `rdi` = the
 /// kernel stack, `rsi` = `_DYNAMIC`, align, call [`_dlstart_c`].
+///
+/// # Safety
+///
+/// Entered once by the kernel/loader with a valid stack and `_DYNAMIC`;
+/// never call, never return (the `ud2` traps any fallthrough).
 #[cfg(all(not(test), target_arch = "x86_64"))]
 #[unsafe(naked)]
 pub unsafe extern "C" fn _dlstart() {
