@@ -180,26 +180,21 @@ unsafe extern "C" fn dummy_wave(_ctx: *mut c_void) {}
 
 /// Link a new thread into the registry ring.
 ///
-/// shortcut(no start handshake, like C1): the child may already be dead
-/// when this runs — then its `unregister` no-op'd on the absent node and
-/// the joiner is about to free it, so a `tid == 0` node (the kernel clears
-/// the `CHILD_CLEARTID` word at death) is skipped, never listed. A child
-/// dying *during* the splice still unregisters normally (it needs this
-/// same lock, so it unlinks after us).
+/// Runs BEFORE `clone`: a detached child may fully exit — and unmap its
+/// own stack — before the parent returns from `clone`, so touching `td`
+/// afterwards would be use-after-unmap. The node carries `tid == 0`
+/// until the kernel writes it during `clone`; waves skip zero-tid nodes
+/// (their `TARGET_TID` is never 0 mid-wave). Clone failure unregisters
+/// again before unmapping.
 ///
 /// # Safety
 ///
-/// `td` must be a `Thread` whose `clone` just succeeded (kernel-written
-/// `tid`, TLS carved) and which is not already registered. The caller must
-/// hold no locks; this takes `REG_LOCK` (briefly; may sleep mid-wave).
+/// `td` must be a fully initialized `Thread` (TLS carved, all fields
+/// set) not already registered. The caller must hold no locks; this
+/// takes `REG_LOCK` (briefly; may sleep mid-wave).
 pub(crate) unsafe fn register_thread(td: *mut Thread) {
     unsafe {
         reg_lock();
-        // Fully dead before we got here (see shortcut above): list nothing.
-        if core::ptr::addr_of!((*td).tid).read() == 0 {
-            reg_unlock();
-            return;
-        }
         let head = core::ptr::addr_of_mut!(REG_HEAD).read();
         if head.is_null() {
             (*td).head.next = td.cast();
@@ -289,14 +284,6 @@ pub(crate) unsafe fn unregister_thread(td: *mut Thread) {
 /// never call directly.
 unsafe extern "C" fn synccall_handler(_sig: c_int) {
     unsafe {
-        // DIAG ONLY (revert): prove handler entry with one raw byte.
-        static DIAG_H: u8 = b'H';
-        let _ = crate::syscall::syscall3(
-            crate::syscall::SYS_WRITE,
-            2,
-            core::ptr::addr_of!(DIAG_H) as usize,
-            1,
-        );
         // Not our catch (stray signal, or the wave already moved on): do
         // nothing. A null TP (boot, no thread yet) also bails — it must
         // never be dereferenced.
@@ -307,7 +294,7 @@ unsafe extern "C" fn synccall_handler(_sig: c_int) {
         if core::ptr::addr_of!((*tp).tid).read() != TARGET_TID.load(Ordering::SeqCst) {
             return;
         }
-        let saved_errno = *crate::errno::__errno_location();
+        let saved_errno = crate::errno::errno_load(crate::errno::__errno_location());
         // Tell the caller we arrived, then wait for our turn to run.
         sem_post(&CALLER_SEM);
         sem_wait(&TARGET_SEM);
@@ -319,7 +306,7 @@ unsafe extern "C" fn synccall_handler(_sig: c_int) {
         sem_wait(&EXIT_SEM);
         // Tell the caller we are leaving; the wave state may be torn down.
         sem_post(&CALLER_SEM);
-        *crate::errno::__errno_location() = saved_errno;
+        crate::errno::errno_store(crate::errno::__errno_location(), saved_errno);
     }
 }
 

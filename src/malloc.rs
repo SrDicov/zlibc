@@ -58,14 +58,47 @@ static mut FREE_HEAD: *mut Chunk = null_mut();
 static mut HEAP_LOCK: MutexT = [0; 5];
 /// Over-aligned records live here, not in-band: a magic stamp before the
 /// payload would be ambiguous with a plain chunk header's link word.
-/// 64 concurrent over-aligned objects is plenty for a lite engine; when
-/// full, aligned requests fail clean instead of corrupting (`shortcut:` —
-/// spill to chained blocks if ever measured full, not before).
-static mut AMAP: [AlignRec; 64] = [AlignRec {
+/// 1024 concurrent over-aligned objects; beyond that aligned requests
+/// fail clean instead of corrupting (documented lite-scope bound —
+/// `mallocng` keeps no map at all).
+const AMAP_CAP: usize = 1024;
+static mut AMAP: [AlignRec; AMAP_CAP] = [AlignRec {
     addr: 0,
     orig: 0,
     total: 0,
-}; 64];
+}; AMAP_CAP];
+
+/// Arena bounds for ownership checks, linked intrusively (no cap, no
+/// extra mapping): 32 header bytes per arena keep every chunk
+/// 16-aligned. `free`/`realloc` reject pointers outside all arenas
+/// instead of corrupting the list (musl `mallocng` aborts the same way
+/// on detectable corruption; mid-live-chunk frees stay UB, as in C).
+struct Arena {
+    base: usize,
+    len: usize,
+    next: *mut Arena,
+}
+const ARENA_HDR: usize = 32;
+
+static mut ARENA_HEAD: *mut Arena = null_mut();
+
+/// True when `[ptr, ptr+len)` lies fully inside one live arena.
+unsafe fn in_heap_range(ptr: usize, len: usize) -> bool {
+    unsafe {
+        let end = match ptr.checked_add(len) {
+            Some(e) => e,
+            None => return false,
+        };
+        let mut a = addr_of_mut!(ARENA_HEAD).read();
+        while !a.is_null() {
+            if (*a).base <= ptr && end <= (*a).base.wrapping_add((*a).len) {
+                return true;
+            }
+            a = (*a).next;
+        }
+        false
+    }
+}
 
 fn lock() {
     unsafe {
@@ -149,7 +182,7 @@ unsafe fn take_aligned(alignment: usize, size: usize) -> *mut u8 {
         if addr != raw as usize {
             let mut slot = null_mut::<AlignRec>();
             let mut k = 0;
-            while k < 64 {
+            while k < AMAP_CAP {
                 let r = addr_of_mut!(AMAP).cast::<AlignRec>().add(k);
                 if (*r).addr == 0 && slot.is_null() {
                     slot = r;
@@ -170,7 +203,8 @@ unsafe fn take_aligned(alignment: usize, size: usize) -> *mut u8 {
 }
 
 /// Fresh address space for a `want`-sized chunk (lock held): one rounded
-/// arena, fed whole; splitting happens in `take`.
+/// arena, header-linked for ownership checks, remainder fed whole;
+/// splitting happens in `take`.
 unsafe fn refill(want: usize) -> bool {
     unsafe {
         let arena = match want.max(ARENA_MIN).checked_add(4095).map(|m| m & !4095) {
@@ -189,17 +223,24 @@ unsafe fn refill(want: usize) -> bool {
         if map == -1 {
             return false;
         }
-        feed(map as *mut u8, arena);
+        let head = map as *mut Arena;
+        (*head).base = map as usize;
+        (*head).len = arena;
+        (*head).next = addr_of_mut!(ARENA_HEAD).read();
+        addr_of_mut!(ARENA_HEAD).write(head);
+        feed((map as *mut u8).add(ARENA_HDR), arena - ARENA_HDR);
         true
     }
 }
 
 /// Release a live payload (lock held): side-map hit for over-aligned,
-/// header math for plain.
+/// validated header math for plain. Validation failures unlock and
+/// panic (musl `mallocng` aborts the same way); the list is untouched
+/// at that point, so the heap stays consistent for everyone else.
 unsafe fn free_inner(addr: usize) {
     unsafe {
         let mut k = 0;
-        while k < 64 {
+        while k < AMAP_CAP {
             let r = addr_of_mut!(AMAP).cast::<AlignRec>().add(k);
             if (*r).addr == addr {
                 (*r).addr = 0;
@@ -208,31 +249,62 @@ unsafe fn free_inner(addr: usize) {
             }
             k += 1;
         }
-        let orig = (addr - size_of::<Chunk>()) as *mut Chunk;
-        give(orig as *mut u8, (*orig).size);
+        let orig = match addr.checked_sub(size_of::<Chunk>()) {
+            Some(o) if in_heap_range(o, size_of::<Chunk>()) && in_heap_range(addr, 1) => o,
+            _ => {
+                unlock();
+                panic!("zlibc malloc: free of foreign pointer");
+            }
+        };
+        give(orig as *mut u8, (*(orig as *mut Chunk)).size);
     }
 }
 
 /// Usable bytes behind a live payload (lock held): side-map hit for
-/// over-aligned, header math for plain.
+/// over-aligned, validated header math for plain (same abort contract
+/// as [`free_inner`]).
 unsafe fn usable(addr: usize) -> usize {
     unsafe {
         let mut k = 0;
-        while k < 64 {
+        while k < AMAP_CAP {
             let r = addr_of_mut!(AMAP).cast::<AlignRec>().add(k);
             if (*r).addr == addr {
                 return (*r).orig + (*r).total - addr;
             }
             k += 1;
         }
-        let orig = (addr - size_of::<Chunk>()) as *mut Chunk;
-        (*orig).size - size_of::<Chunk>()
+        let orig = match addr.checked_sub(size_of::<Chunk>()) {
+            Some(o) if in_heap_range(o, size_of::<Chunk>()) && in_heap_range(addr, 1) => o,
+            _ => {
+                unlock();
+                panic!("zlibc malloc: realloc of foreign pointer");
+            }
+        };
+        (*(orig as *mut Chunk)).size - size_of::<Chunk>()
     }
 }
 
 /// Insert a freed chunk address-ordered, merging live neighbours.
+/// Rejects an already-listed node first: linking one node twice would
+/// close a cycle and hang `take` forever (double free aborts like musl
+/// `mallocng`; the lock is released before panicking so the heap — and
+/// every other thread — survives).
 unsafe fn give(ptr: *mut u8, len: usize) {
     unsafe {
+        let mut c = addr_of_mut!(FREE_HEAD).read();
+        while !c.is_null() {
+            if core::ptr::eq(c, ptr as *mut Chunk) {
+                unlock();
+                panic!("zlibc malloc: double free");
+            }
+            // Alias strictly inside a listed range (mid-chunk free of
+            // free space): same abort, same reason.
+            if (c as usize) < ptr as usize && (ptr as usize) < (c as usize) + (*c).size {
+                unlock();
+                panic!("zlibc malloc: free inside free space");
+            }
+            c = (*c).next;
+        }
         // First chunk above `ptr`; `prev` trails one behind.
         let mut prev: *mut Chunk = null_mut();
         let mut cur = addr_of_mut!(FREE_HEAD).read();
@@ -266,13 +338,13 @@ unsafe fn give(ptr: *mut u8, len: usize) {
 
 fn set_oom() {
     unsafe {
-        *__errno_location() = ENOMEM;
+        crate::errno::errno_store(__errno_location(), ENOMEM);
     }
 }
 
 fn set_err(e: c_int) {
     unsafe {
-        *__errno_location() = e;
+        crate::errno::errno_store(__errno_location(), e);
     }
 }
 
@@ -323,7 +395,9 @@ pub unsafe extern "C" fn malloc(n: usize) -> *mut c_void {
 /// # Safety
 ///
 /// `p` must be null or a live pointer from any entry point in this
-/// module (plain or over-aligned), freed exactly once.
+/// module (plain or over-aligned), freed exactly once. Double frees and
+/// foreign pointers abort the process (musl `mallocng` fails the same
+/// way); the heap stays consistent for everyone else.
 #[no_mangle]
 pub unsafe extern "C" fn free(p: *mut c_void) {
     if p.is_null() {
@@ -462,8 +536,9 @@ pub unsafe extern "C" fn posix_memalign(
 #[no_mangle]
 pub unsafe extern "C" fn memalign(alignment: usize, size: usize) -> *mut c_void {
     unsafe {
-        // Bit-trick pow2 ceiling (no version-sensitive helpers): wrap on
-        // absurd input lands below 16 and fails clean through the gate.
+        // Bit-trick pow2 ceiling (no version-sensitive helpers). A wrapped
+        // ceiling (absurd input) would silently under-align SIMD/page
+        // tricks downstream: fail clean instead.
         let mut a = alignment.max(16).wrapping_sub(1);
         a |= a >> 1;
         a |= a >> 2;
@@ -473,7 +548,11 @@ pub unsafe extern "C" fn memalign(alignment: usize, size: usize) -> *mut c_void 
         #[cfg(target_pointer_width = "64")]
         let a = a | (a >> 32);
         let a = a.wrapping_add(1);
-        aligned_body(a.max(16), size)
+        if a < alignment || a < 16 {
+            set_oom();
+            return null_mut();
+        }
+        aligned_body(a, size)
     }
 }
 
@@ -592,13 +671,92 @@ mod tests {
             assert_eq!(posix_memalign(null_mut(), 16, 16), EINVAL);
             assert_eq!(posix_memalign(&mut q, 20, 16), EINVAL);
             assert!(q.is_null());
-            // Sequential churn reuses the 64 side-map slots forever.
+            // Sequential churn reuses the side-map slots forever.
             let mut j = 0;
             while j < 200 {
                 let mut r: *mut core::ffi::c_void = null_mut();
                 assert_eq!(posix_memalign(&mut r, 64, 64), 0);
                 free(r);
                 j += 1;
+            }
+        }
+    }
+
+    /// A second free of one object aborts instead of hanging `take` on
+    /// a closed cycle (the heap stays consistent: detection precedes
+    /// any link write, and the lock is released before panicking).
+    /// `extern "C"` cannot unwind, so death is asserted out-of-process:
+    /// same test, child role under `ZLIBC_DEATH`.
+    #[test]
+    fn double_free_aborts() {
+        if std::env::var("ZLIBC_DEATH").is_ok() {
+            unsafe {
+                let p = malloc(64);
+                assert!(!p.is_null());
+                free(p);
+                free(p);
+            }
+            unreachable!("survived double free");
+        }
+        let me = std::env::current_exe().unwrap();
+        let st = std::process::Command::new(me)
+            .env("ZLIBC_DEATH", "1")
+            .arg("--exact")
+            .arg("malloc::tests::double_free_aborts")
+            .arg("--test-threads=1")
+            .status()
+            .unwrap();
+        assert!(!st.success());
+    }
+
+    /// A stack address is not heap memory: clean abort, no corruption.
+    #[test]
+    fn foreign_free_aborts() {
+        if std::env::var("ZLIBC_DEATH").is_ok() {
+            let mut x = [0u8; 64];
+            unsafe {
+                free(x.as_mut_ptr() as *mut core::ffi::c_void);
+            }
+            unreachable!("survived foreign free");
+        }
+        let me = std::env::current_exe().unwrap();
+        let st = std::process::Command::new(me)
+            .env("ZLIBC_DEATH", "1")
+            .arg("--exact")
+            .arg("malloc::tests::foreign_free_aborts")
+            .arg("--test-threads=1")
+            .status()
+            .unwrap();
+        assert!(!st.success());
+    }
+
+    /// Absurd alignments fail clean (NULL), never under-aligned.
+    #[test]
+    fn memalign_huge_alignment_fails_clean() {
+        unsafe {
+            assert!(memalign(usize::MAX, 64).is_null());
+            let a = aligned_alloc(64, 64);
+            assert!(!a.is_null());
+            free(a);
+        }
+    }
+
+    /// 65 live over-aligned objects: no spurious 64-cap failure.
+    #[test]
+    fn sixty_five_live_aligned_holds() {
+        unsafe {
+            let mut ps = [null_mut::<core::ffi::c_void>(); 65];
+            let mut k = 0;
+            while k < 65 {
+                let mut r: *mut core::ffi::c_void = null_mut();
+                assert_eq!(posix_memalign(&mut r, 64, 64), 0);
+                ps[k] = r;
+                k += 1;
+            }
+            let mut k = 0;
+            while k < 65 {
+                free(ps[k]);
+                k += 1;
             }
         }
     }

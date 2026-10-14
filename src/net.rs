@@ -173,6 +173,38 @@ pub unsafe extern "C" fn recvfrom(
     }
 }
 
+/// Send bytes on a connected socket (musl `send`: `sendto` with a null
+/// address, `src/network/send.c`).
+///
+/// # Safety
+///
+/// `buf` must be readable for `len` bytes.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn send(fd: c_int, buf: *const c_void, len: usize, flags: c_int) -> isize {
+    unsafe { sendto(fd, buf, len, flags, core::ptr::null(), 0) }
+}
+
+/// Receive bytes on a connected socket (musl `recv`: `recvfrom` with
+/// null address pair, `src/network/recv.c`).
+///
+/// # Safety
+///
+/// `buf` must be writable for `len` bytes.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn recv(fd: c_int, buf: *mut c_void, len: usize, flags: c_int) -> isize {
+    unsafe {
+        recvfrom(
+            fd,
+            buf,
+            len,
+            flags,
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+        )
+    }
+}
 /// Shut part of a connection (musl `shutdown`).
 ///
 /// # Safety
