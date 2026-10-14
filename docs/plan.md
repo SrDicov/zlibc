@@ -343,6 +343,15 @@ use-after-unmap nondeterminista.
   `wake` *call*; exit now publishes + wakes + dies in one opaque
   registers-only trap block (musl's store+wake barrier discipline).
   Validated by 60/60 clean trap-loop iterations plus a green suite.
+- **Wave 6** — dynamic linker, ending in a musl-gcc hello running
+  unmodified (Alpine gate groundwork). Packet 6A DONE: `_dlstart`
+  bootstrap (`src/ldso/dlstart.rs`: auxv skip, bias via `AT_BASE` or
+  `AT_PHDR` scan, RELATIVE-only self-reloc for REL/RELA/RELR, musl-exact
+  entry asm behind `cfg(not(test))`, 63 tests green). Lesson: write the
+  *target slot* (`base + rel[0]`), never the table entry — caught by the
+  suite, fixed line-faithful to `dlstart.c`. Next: 6B link-map +
+  cross-DSO lookup, 6C dynamic TLS, 6D lazy PLT + `libdl`, 6E musl-gcc
+  gate.
 - **Wave 5** — a real binary on zlibc only. Packet 1 DONE (v0.5):
   `hello/` consumer crate (`panic=abort`, `-nostdlib` scoped from its
   own build script so host build tools keep working, `rust_eh_personality`

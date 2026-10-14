@@ -9,6 +9,7 @@
 //! `crate::syscall::SYS_WRITE` until they are generated from
 //! `arch/x86_64/bits/`.
 
+pub mod dlstart;
 pub mod dso;
 pub mod reloc;
 
@@ -134,6 +135,58 @@ pub const DT_VERSYM: usize = 0x6ffffff0;
 /// musl `DT_GNU_HASH` (musl `include/elf.h:802`).
 #[cfg(target_arch = "x86_64")]
 pub const DT_GNU_HASH: usize = 0x6ffffef5;
+/// musl `DT_RELA` (musl `include/elf.h:746`).
+#[cfg(target_arch = "x86_64")]
+pub const DT_RELA: usize = 7;
+/// musl `DT_RELASZ` (musl `include/elf.h:747`).
+#[cfg(target_arch = "x86_64")]
+pub const DT_RELASZ: usize = 8;
+/// musl `DT_RELAENT` (musl `include/elf.h:748`).
+#[cfg(target_arch = "x86_64")]
+pub const DT_RELAENT: usize = 9;
+/// musl `DT_REL` (musl `include/elf.h:756`).
+#[cfg(target_arch = "x86_64")]
+pub const DT_REL: usize = 17;
+/// musl `DT_RELSZ` (musl `include/elf.h:757`).
+#[cfg(target_arch = "x86_64")]
+pub const DT_RELSZ: usize = 18;
+/// musl `DT_RELENT` (musl `include/elf.h:758`).
+#[cfg(target_arch = "x86_64")]
+pub const DT_RELENT: usize = 19;
+/// musl `DT_RELRSZ` (musl `include/elf.h:774`).
+#[cfg(target_arch = "x86_64")]
+pub const DT_RELRSZ: usize = 35;
+/// musl `DT_RELR` (musl `include/elf.h:775`).
+#[cfg(target_arch = "x86_64")]
+pub const DT_RELR: usize = 36;
+/// musl `DT_RELRENT` (musl `include/elf.h:776`).
+#[cfg(target_arch = "x86_64")]
+pub const DT_RELRENT: usize = 37;
+/// musl `AUX_CNT` (musl `src/internal/dynlink.h:103`).
+#[cfg(target_arch = "x86_64")]
+pub const AUX_CNT: usize = 32;
+/// musl `DYN_CNT` (musl `src/internal/dynlink.h:104`; note tag 37 itself
+/// falls outside, exactly like musl — mirrored, not fixed).
+#[cfg(target_arch = "x86_64")]
+pub const DYN_CNT: usize = 37;
+/// musl `AT_NULL` (musl `include/elf.h:1003`).
+#[cfg(target_arch = "x86_64")]
+pub const AT_NULL: usize = 0;
+/// musl `AT_PHDR` (musl `include/elf.h:1006`).
+#[cfg(target_arch = "x86_64")]
+pub const AT_PHDR: usize = 3;
+/// musl `AT_PHENT` (musl `include/elf.h:1007`).
+#[cfg(target_arch = "x86_64")]
+pub const AT_PHENT: usize = 4;
+/// musl `AT_PHNUM` (musl `include/elf.h:1008`).
+#[cfg(target_arch = "x86_64")]
+pub const AT_PHNUM: usize = 5;
+/// musl `AT_BASE` (musl `include/elf.h:1010`).
+#[cfg(target_arch = "x86_64")]
+pub const AT_BASE: usize = 7;
+/// musl `AT_ENTRY` (musl `include/elf.h:1012`).
+#[cfg(target_arch = "x86_64")]
+pub const AT_ENTRY: usize = 9;
 
 /// musl `Elf64_Ehdr` (musl `include/elf.h:54-69`).
 #[cfg(target_arch = "x86_64")]
