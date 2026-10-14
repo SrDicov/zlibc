@@ -82,7 +82,11 @@ fn tid_word(td: *mut Thread) -> *mut c_int {
 /// Must be called with the parent's stack intact (it is: only the child's
 /// words are touched). The child's `func` must never panic (unwinding
 /// through the trap frame aborts the process).
+///
+/// `inlateout` operands are read by the trap below; the lint cannot see
+/// into asm, hence the targeted allow.
 #[cfg(target_arch = "x86_64")]
+#[allow(unused_assignments)]
 unsafe fn raw_clone(
     mut flags: u32,
     mut stack: usize,
@@ -372,12 +376,10 @@ pub unsafe extern "C" fn __pthread_create(
         // unset) contributes zeros instead of foreign bytes (same magic
         // discipline as `errno.rs`).
         let parent = get_tp() as *mut Thread;
-        let ours = !parent.is_null() && unsafe { (*parent).magic == super::THREAD_MAGIC };
+        let ours = !parent.is_null() && (*parent).magic == super::THREAD_MAGIC;
         if ours {
-            unsafe {
-                (*td).head.canary = (*parent).head.canary;
-                (*td).head.sysinfo = (*parent).head.sysinfo;
-            }
+            (*td).head.canary = (*parent).head.canary;
+            (*td).head.sysinfo = (*parent).head.sysinfo;
         } else {
             (*td).head.canary = 0;
             (*td).head.sysinfo = 0;
