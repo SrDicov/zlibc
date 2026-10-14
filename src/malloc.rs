@@ -299,7 +299,7 @@ unsafe fn give(ptr: *mut u8, len: usize) {
             }
             // Alias strictly inside a listed range (mid-chunk free of
             // free space): same abort, same reason.
-            if (c as usize) < ptr as usize && ptr as usize < (c as usize) + (*c).size {
+            if (c as usize) < ptr as usize && (ptr as usize) < (c as usize) + (*c).size {
                 unlock();
                 panic!("zlibc malloc: free inside free space");
             }
