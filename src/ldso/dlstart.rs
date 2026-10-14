@@ -75,7 +75,8 @@ pub(crate) unsafe fn relocate_self(base: usize, dynt: &[usize; DYN_CNT]) {
         let mut left = dynt[DT_RELSZ];
         while left > 0 {
             if (*p.add(1) & 0xffff_ffff) as u32 == R_RELATIVE {
-                *p = (*p).wrapping_add(base);
+                let slot = base.wrapping_add(*p) as *mut usize;
+                *slot = (*slot).wrapping_add(base);
             }
             p = p.add(2);
             left -= 2 * size_of::<usize>();
@@ -85,7 +86,8 @@ pub(crate) unsafe fn relocate_self(base: usize, dynt: &[usize; DYN_CNT]) {
         let mut left = dynt[DT_RELASZ];
         while left > 0 {
             if (*p.add(1) & 0xffff_ffff) as u32 == R_RELATIVE {
-                *p = base.wrapping_add(*p.add(2));
+                let slot = base.wrapping_add(*p) as *mut usize;
+                *slot = base.wrapping_add(*p.add(2));
             }
             p = p.add(3);
             left -= 3 * size_of::<usize>();
