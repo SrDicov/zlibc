@@ -1608,6 +1608,8 @@ mod tests {
 
     /// `w+` streams read back what they wrote (socketpair ends are
     /// bidirectional; pipes are not, so this never worked through them).
+    /// Exact-size reads only: over-reading with the writer open blocks,
+    /// like musl (both directions get their own turn instead).
     #[test]
     fn plus_mode_reads_and_writes() {
         unsafe {
@@ -1622,12 +1624,24 @@ mod tests {
                 msg.len()
             );
             assert_eq!(fflush(f0), 0);
-            let mut back = [0u8; 16];
+            let mut back = [0u8; 8];
             assert_eq!(
-                fread(back.as_mut_ptr() as *mut _, 1, back.len(), f1),
+                fread(back.as_mut_ptr() as *mut _, 1, msg.len(), f1),
                 msg.len()
             );
             assert_eq!(&back[..msg.len()], msg);
+            let msg2 = b"back!";
+            assert_eq!(
+                fwrite(msg2.as_ptr() as *const _, 1, msg2.len(), f1),
+                msg2.len()
+            );
+            assert_eq!(fflush(f1), 0);
+            let mut back2 = [0u8; 8];
+            assert_eq!(
+                fread(back2.as_mut_ptr() as *mut _, 1, msg2.len(), f0),
+                msg2.len()
+            );
+            assert_eq!(&back2[..msg2.len()], msg2);
             assert_eq!(fclose(f0), 0);
             assert_eq!(fclose(f1), 0);
         }
