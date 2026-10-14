@@ -50,11 +50,11 @@ jobs:
         run: |
           cd hello
           cargo fmt --check
-          for b in hello hello-threads hello-malloc hello-args; do
+          for b in hello hello-threads hello-malloc hello-args hello-fs; do
             echo "== clippy $b =="
             cargo clippy --bin "$b" -- -D warnings || exit 1
           done
-          for b in hello hello-threads hello-malloc hello-args; do
+          for b in hello hello-threads hello-malloc hello-args hello-fs; do
             echo "== build $b =="
             cargo build --bin "$b" --verbose || exit 1
           done
@@ -68,3 +68,5 @@ jobs:
           out=$(TEST_MARKER=zzq ./target/debug/hello-args a1 "a b" a3)
           exp=$(printf 'argc=4\nargv=a1\nargv=a b\nargv=a3\nenv=zzq')
           test "$out" = "$exp"
+          out=$(./target/debug/hello-fs)
+          test "$out" = "fs ok 11 bytes"
