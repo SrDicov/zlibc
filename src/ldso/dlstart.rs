@@ -294,6 +294,8 @@ mod tests {
         dynt[DT_RELSZ] = 4 * size_of::<usize>();
         dynt[DT_RELR] = &mut relr as *mut usize as usize - BASE;
         dynt[DT_RELRSZ] = 2 * size_of::<usize>();
+        // Rig contract: link-time offsets recover real addresses via BASE.
+        assert_eq!(BASE.wrapping_add(rela[0]), slots.as_mut_ptr() as usize);
         unsafe { relocate_self(BASE, &dynt) };
         // RELA RELATIVE: base + addend; GLOB_DAT skipped.
         assert_eq!(slots[0], BASE + 0x10);
