@@ -358,6 +358,10 @@ use-after-unmap nondeterminista.
   never loads the rlib metadata, so `extern crate zlibc;` is
   load-bearing for the panic handler (proven by removal); a `main` that
   dereferences argv must be `unsafe fn`.
+  Packet 5 DONE (v0.9): `hello-fs` — real `fopen`/`fwrite`/`fclose`/
+  `fread` roundtrip on the filesystem plus `memcmp` (the missing fourth
+  of the mem trio, musl ordering). CLOSED: five binaries run on zlibc
+  only, 59 lib tests green.
 
 ## "100% done" criteria
 
