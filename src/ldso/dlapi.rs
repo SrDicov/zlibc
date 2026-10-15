@@ -326,7 +326,7 @@ mod tests {
             while *first.add(n) != 0 {
                 n += 1;
             }
-            let bytes = core::slice::from_raw_parts(first as *const u8, 6);
+            let bytes = core::slice::from_raw_parts(first as *const u8, 5);
             assert_eq!(bytes, b"boom\0");
             assert!(dlerror().is_null(), "flag cleared by the first read");
         }
