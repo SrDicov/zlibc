@@ -257,6 +257,19 @@ pub const AT_BASE: usize = 7;
 /// musl `AT_ENTRY` (musl `include/elf.h:1012`).
 #[cfg(target_arch = "x86_64")]
 pub const AT_ENTRY: usize = 9;
+/// musl `AT_UID`/`AT_EUID`/`AT_GID`/`AT_EGID` (`include/elf.h:1014-1017`)
+/// and `AT_SECURE` (`include/elf.h:1038`): the identity keys the loader
+/// reads to decide `secure` (musl `dynlink.c:1822-1824`).
+#[cfg(target_arch = "x86_64")]
+pub const AT_UID: usize = 11;
+#[cfg(target_arch = "x86_64")]
+pub const AT_EUID: usize = 12;
+#[cfg(target_arch = "x86_64")]
+pub const AT_GID: usize = 13;
+#[cfg(target_arch = "x86_64")]
+pub const AT_EGID: usize = 14;
+#[cfg(target_arch = "x86_64")]
+pub const AT_SECURE: usize = 23;
 
 /// musl `Elf64_Ehdr` (musl `include/elf.h:54-69`).
 #[cfg(target_arch = "x86_64")]
