@@ -27,8 +27,9 @@ use super::dso::{decode_vec, Dso};
 use super::linkmap::{self, LoadFn};
 use super::reloc::do_relocs;
 use super::{
-    AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM, AUX_CNT, DT_JMPREL, DT_PLTREL, DT_PLTRELSZ, DT_REL,
-    DT_RELA, DT_RELASZ, DT_RELR, DT_RELRSZ, DT_RELSZ, DYN_CNT, PT_DYNAMIC, PT_INTERP, PT_TLS,
+    AT_ENTRY, AT_PHNUM, AT_PHDR, AT_PHENT, AUX_CNT, DT_JMPREL, DT_NULL, DT_PLTREL, DT_PLTRELSZ,
+    DT_REL, DT_RELA, DT_RELASZ, DT_RELR, DT_RELRSZ, DT_RELSZ, DYN_CNT, PT_DYNAMIC, PT_INTERP,
+    PT_TLS,
 };
 
 /// musl `reloc_all` (`dynlink.c:1412-1440`) for one object: PLT, then
@@ -80,25 +81,29 @@ pub unsafe fn reloc_all(head: *mut Dso, dso: *mut Dso, skip_relative: bool) {
         if dynv[DT_RELR] != 0 || dynv[DT_RELRSZ] != 0 {
             let mut left = dynv[DT_RELRSZ];
             let mut p = laddr(dynv[DT_RELR]);
+            let mut relr_base = 0usize;
             while left >= size_of::<usize>() {
-                let mut base_idx = 0usize;
                 if *p & 1 == 1 {
+                    // DT_RELR entry: bit 0 set, the remaining bits are
+                    // a bitmap of which words from `base_idx` onward are
+                    // `RELATIVE` (musl `do_relr_relocs`,
+                    // `dynlink.c:563-580`).
                     let mut bits = *p >> 1;
                     while bits != 0 {
                         if bits & 1 == 1 && !skip_relative {
-                            let slot = base.wrapping_add((base_idx + 1) * size_of::<usize>());
+                            let slot = base
+                                .wrapping_add((relr_base + 1) * size_of::<usize>());
                             *(slot as *mut usize) = base.wrapping_add(*(slot as *const usize));
                         }
-                        base_idx += usize::BITS as usize;
+                        relr_base = relr_base.wrapping_add(usize::BITS as usize);
                         bits >>= 1;
                     }
-                    left -= size_of::<usize>();
-                    p = p.add(1);
                 } else {
-                    base_idx = base_idx.wrapping_add(usize::BITS as usize * (*p >> 1));
-                    left -= size_of::<usize>();
-                    p = p.add(1);
+                    // Address entry: the top bits hold a word index.
+                    relr_base = relr_base.wrapping_add(usize::BITS as usize * (*p >> 1));
                 }
+                left -= size_of::<usize>();
+                p = p.add(1);
             }
         }
         (*dso).relocated = 1;
@@ -262,7 +267,7 @@ mod tests {
             let mut dso: Dso = core::mem::zeroed();
             dso.base = mem.as_mut_ptr() as *mut u8;
             let mut raw = [0usize; 2];
-            raw[0] = super::DT_NULL;
+            raw[0] = DT_NULL;
             raw[1] = 0;
             dso.dynv = raw.as_mut_ptr();
             assert_eq!(dso.relocated, 0);
