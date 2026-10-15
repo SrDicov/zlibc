@@ -110,6 +110,30 @@ crate::weak_alias!(program_invocation_short_name, __progname);
 #[cfg(not(test))]
 crate::weak_alias!(program_invocation_name, __progname_full);
 
+/// Empty environment sentinel: one null pointer, so `*__environ` reads
+/// NULL (valid empty environment) if anyone looks before [`__init_libc`]
+/// installs the real `envp`. `__environ` points here initially instead
+/// of null for the same COMMON reason as [`__progname`]: a null pointer
+/// is not a value the compiler will emit into `.data`, and the `.set`
+/// aliases below need a strong definition. musl holds NULL until
+/// `__init_libc`; the observable difference ends there.
+static mut EMPTY_ENV: [*mut c_char; 1] = [core::ptr::null_mut()];
+
+/// musl `char **__environ` (`src/env/__environ.c:3`), installed from
+/// `envp` in [`__init_libc`] (musl `__libc_start_main.c:26`).
+#[cfg(not(test))]
+#[no_mangle]
+pub static mut __environ: *mut *mut c_char =
+    core::ptr::addr_of_mut!(EMPTY_ENV).cast::<*mut c_char>();
+
+// musl `src/env/__environ.c:4-6`: three weak names, one variable.
+#[cfg(not(test))]
+crate::weak_alias!(___environ, __environ);
+#[cfg(not(test))]
+crate::weak_alias!(_environ, __environ);
+#[cfg(not(test))]
+crate::weak_alias!(environ, __environ);
+
 /// musl `src/env/__stack_chk_fail.c:5` (`uintptr_t __stack_chk_guard`).
 #[cfg(not(test))]
 #[no_mangle]
@@ -232,8 +256,9 @@ fn progname_short(pn: *const c_char) -> *const c_char {
 /// Wave 2 contract: envp→auxv scan, `__hwcap`, page size, `__init_ssp`
 /// from `AT_RANDOM`, `__progname`/`__progname_full` from `argv[0]`, and
 /// the set-uid/set-gid/`AT_SECURE` early-return check (lines 42-43).
-/// Deferred: `__environ` (needs no loader state, still unwired),
-/// `__init_tls` (Wave 3 owns the TP), `__sysinfo` (vdso, with B2/B3).
+/// `__environ` is installed here too (musl `__libc_start_main.c:26`).
+/// Deferred: `__init_tls` (Wave 3 owns the TP), `__sysinfo` (vdso, with
+/// B2/B3).
 ///
 /// # Safety
 ///
@@ -243,6 +268,7 @@ fn progname_short(pn: *const c_char) -> *const c_char {
 #[cfg(not(test))]
 #[no_mangle]
 pub unsafe extern "C" fn __init_libc(envp: *mut *mut c_char, pn: *const c_char) {
+    unsafe { core::ptr::addr_of_mut!(__environ).write(envp) };
     let mut n = 0usize;
     while !(unsafe { envp.wrapping_add(n).read() }).is_null() {
         n += 1;
@@ -458,5 +484,15 @@ mod tests {
         assert_eq!(progname_short(bare.as_ptr()), bare.as_ptr());
         let empty = c"";
         assert_eq!(progname_short(empty.as_ptr()), empty.as_ptr());
+    }
+
+    /// `EMPTY_ENV` reads as a valid empty environment: one null
+    /// pointer, so `*__environ` is NULL before `__init_libc` installs the
+    /// real `envp`. (`__init_libc` itself writes process-global state and
+    /// stays out of tests, like the rest of this module's runtime half.)
+    #[test]
+    fn empty_env_is_null_terminated() {
+        let slot = unsafe { core::ptr::addr_of!(super::EMPTY_ENV).read()[0] };
+        assert!(slot.is_null());
     }
 }
