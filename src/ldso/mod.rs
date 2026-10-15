@@ -138,6 +138,32 @@ pub const DT_FLAGS: usize = 30;
 /// marking how many leading `DT_RELA` entries are `RELATIVE`.
 #[cfg(target_arch = "x86_64")]
 pub const DT_RELACOUNT: usize = 0x6ffffff9;
+/// musl `DT_PLTRELSZ` (musl `include/elf.h:741`): size of the PLT
+/// relocation table `DT_JMPREL` points at.
+#[cfg(target_arch = "x86_64")]
+pub const DT_PLTRELSZ: usize = 2;
+/// musl `DT_PLTREL` (musl `include/elf.h:759`): which relocation type
+/// `DT_JMPREL` holds — `DT_RELA` or `DT_REL` — which decides the stride
+/// `reloc_all` uses for the PLT pass.
+#[cfg(target_arch = "x86_64")]
+pub const DT_PLTREL: usize = 20;
+/// musl `DT_JMPREL` (musl `include/elf.h:762`).
+#[cfg(target_arch = "x86_64")]
+pub const DT_JMPREL: usize = 23;
+/// musl `DT_BIND_NOW` (musl `include/elf.h:758`): out-of-range tag that
+/// forces eager binding for this object.
+#[cfg(target_arch = "x86_64")]
+pub const DT_BIND_NOW: usize = 24;
+/// musl `DT_FLAGS_1` (musl `include/elf.h:825`).
+#[cfg(target_arch = "x86_64")]
+pub const DT_FLAGS_1: usize = 0x6ffffffb;
+/// musl `DF_BIND_NOW` (musl `include/elf.h:846`): the `DT_FLAGS` bit.
+#[cfg(target_arch = "x86_64")]
+pub const DF_BIND_NOW: usize = 0x8;
+/// musl `DF_1_NOW` (musl `include/elf.h:851`): the `DT_FLAGS_1` bit.
+#[cfg(target_arch = "x86_64")]
+pub const DF_1_NOW: usize = 0x1;
+
 /// musl `DT_PLTGOT` (musl `include/elf.h:743`).
 #[cfg(target_arch = "x86_64")]
 pub const DT_PLTGOT: usize = 3;

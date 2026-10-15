@@ -37,4 +37,4 @@ echo "musl x86_64 exported symbols: $total"
 echo "zlibc implements:            $have ($pct%)"
 echo "missing:                     $((total - have))"
 echo "--- first 15 missing (sample, not exhaustive) ---"
-comm -23 "$baseline" /tmp/zlibc-syms.$$ | head -15
+comm -23 "$baseline" /tmp/zlibc-syms.$$ 2>/dev/null | head -15 || true

@@ -326,10 +326,38 @@ pub unsafe fn find_by_shortname(name: *const c_char) -> *mut Dso {
     }
 }
 
+/// Deferred-relocation list head (musl `lazy_head`, `dynlink.c:141`),
+/// threaded through `Dso::lazy_next`.
+static LAZY_HEAD: AtomicPtr<Dso> = AtomicPtr::new(null_mut());
+
+/// Link `p` onto the deferred-relocation list (musl `dynlink.c:2101-2102`).
+///
+/// # Safety
+///
+/// `p` must be a `Dso` with a freshly allocated `lazy` table.
+pub unsafe fn push_lazy(p: *mut Dso) {
+    unsafe {
+        (*p).lazy_next = LAZY_HEAD.load(Ordering::Acquire);
+        LAZY_HEAD.store(p, Ordering::Release);
+    }
+}
+
+/// Detach and return the whole deferred-relocation list (musl
+/// `dynlink.c:584`: the list is taken off before iterating, so a retry
+/// that re-queues an entry cannot extend the loop).
+///
+/// # Safety
+///
+/// Only during loader single ownership.
+pub unsafe fn take_lazy_head() -> *mut Dso {
+    unsafe {
+        let h = LAZY_HEAD.load(Ordering::Acquire);
+        LAZY_HEAD.store(null_mut(), Ordering::Release);
+        h
+    }
+}
+
 /// Already-loaded object with this `(dev, ino)`, skipping the main
-/// program (musl's post-open dedup layer, `dynlink.c:1174-1184`). This
-/// is the layer that actually catches a diamond reached through
-/// different pathnames.
 ///
 /// # Safety
 ///

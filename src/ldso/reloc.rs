@@ -40,6 +40,10 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use super::dso::{gnu_hash, sysv_hash};
 
 use super::dso::Dso;
+use super::{
+    decode_vec, search_vec, DF_1_NOW, DF_BIND_NOW, DT_BIND_NOW, DT_FLAGS, DT_FLAGS_1, DT_PLTRELSZ,
+    DT_RELASZ, DT_RELSZ,
+};
 
 use super::Elf64Sym;
 
@@ -289,6 +293,90 @@ pub unsafe extern "C" fn __tls_get_addr(v: *const usize) -> *mut core::ffi::c_vo
 #[inline(never)]
 fn tlsdesc_static_ptr() -> usize {
     __tlsdesc_static as *const () as usize
+}
+
+// ---- Deferred relocations (musl ldso/dynlink.c:2083-2104, :581-599) ---------
+
+/// musl `prepare_lazy` (`dynlink.c:2083-2104`): reserve the table that
+/// holds relocations whose symbol is not in the namespace yet.
+///
+/// musl has **no PLT trampoline**: every `R_X86_64_JUMP_SLOT` is
+/// resolved eagerly at load time, and "lazy" means only that a symbol
+/// which cannot be found *right now* is recorded here and retried after
+/// `dlopen` has committed the new objects. So the capacity is a bound on
+/// the whole object's unresolved relocations, three words each
+/// (`{r_offset, r_info, addend}`, `dynlink.c:439-444`).
+///
+/// Returns false only when `calloc` fails. An object that asked for eager
+/// binding (`DT_BIND_NOW`, `DF_BIND_NOW`, `DF_1_NOW`) gets no table at
+/// all, so `do_relocs` takes its hard "symbol not found" path instead.
+///
+/// # Safety
+///
+/// `p` must be a valid `Dso` with a mapped `dynv`.
+#[cfg(target_arch = "x86_64")]
+pub unsafe fn prepare_lazy(p: *mut Dso) -> bool {
+    unsafe {
+        let mut dynv = [0usize; DYN_CNT];
+        decode_vec((*p).dynv, dynv.as_mut_ptr(), DYN_CNT);
+        let mut flags1 = 0usize;
+        search_vec((*p).dynv, &mut flags1, DT_FLAGS_1);
+        if dynv[DT_BIND_NOW] != 0
+            || (dynv[DT_FLAGS] & DF_BIND_NOW) != 0
+            || (flags1 & DF_1_NOW) != 0
+        {
+            return true;
+        }
+        // musl:2088-2089 early-returns before touching the table.
+        let dso = &mut *p;
+        dso.lazy = core::ptr::null_mut();
+        dso.lazy_cnt = 0;
+        let n = dynv[DT_RELSZ] / 2 + dynv[DT_RELASZ] / 3 + dynv[DT_PLTRELSZ] / 2 + 1;
+        let slots = crate::malloc::calloc(n, 3 * size_of::<usize>());
+        if slots.is_null() {
+            return false;
+        }
+        dso.lazy = slots as *mut usize;
+        crate::ldso::linkmap::push_lazy(p);
+        true
+    }
+}
+
+/// musl `redo_lazy_relocs` (`dynlink.c:581-599`): retry every recorded
+/// relocation now that `dlopen` has added its objects, then free the
+/// tables that came out clean.
+///
+/// The retry passes `stride = 3` so the stored addend is reused verbatim
+/// instead of the `REL_GOT`/`REL_PLT` override that would zero it.
+///
+/// One subtlety worth stating: `lazy_cnt` is zeroed *before* the re-run,
+/// so a still-unresolved entry is written back at slot 0 — clobbering
+/// the entry we just consumed. That is safe because the write index
+/// (`3*lazy_cnt`) never exceeds the read index, and `do_relocs` copies
+/// `r_offset`/`r_info` into locals before it defers.
+///
+/// # Safety
+///
+/// Only valid after `prepare_lazy` on the objects being retried.
+#[cfg(target_arch = "x86_64")]
+pub unsafe fn redo_lazy_relocs(head: *mut Dso) {
+    unsafe {
+        let mut p = crate::ldso::linkmap::take_lazy_head();
+        while !p.is_null() {
+            let next = (*p).lazy_next;
+            let size = (*p).lazy_cnt * 3 * size_of::<usize>();
+            (*p).lazy_cnt = 0;
+            do_relocs(head, p, (*p).lazy, size, 3, false);
+            if (*p).lazy_cnt != 0 {
+                crate::ldso::linkmap::push_lazy(p);
+            } else {
+                let _ = crate::malloc::free((*p).lazy as *mut core::ffi::c_void);
+                (*p).lazy = core::ptr::null_mut();
+                (*p).lazy_next = core::ptr::null_mut();
+            }
+            p = next;
+        }
+    }
 }
 
 // ---- Symbol lookup (musl ldso/dynlink.c:265-351) ----------------------------
