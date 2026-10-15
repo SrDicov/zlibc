@@ -350,10 +350,23 @@ fn set_err(e: c_int) {
 
 /// Shared engine for every entry point (lock inside): `size` payload
 /// bytes at `alignment` (power of two, ≥ 16), one arena refill on miss.
+/// musl's oversize gate (`SIZE_MAX/2`, `src/malloc/lite_malloc.c`).
+///
+/// Out of line on purpose. Inlined and constant-folded, LLVM's
+/// range reasoning about pointer-sized sizes lets `malloc(SIZE_MAX)`
+/// return non-null at `-O2`: it assumes the argument is a valid object
+/// size, concludes the gate cannot fire, and drops it. One opaque call
+/// keeps the decision where the value is unknown — verified by
+/// `oversize_is_opaque` plus the release-codegen CI step, because this
+/// failure is invisible at `-O0`.
+#[inline(never)]
+fn oversize(size: usize) -> bool {
+    size > usize::MAX / 2
+}
+
 unsafe fn aligned_body(alignment: usize, size: usize) -> *mut c_void {
     unsafe {
-        // musl oversize gate (`SIZE_MAX/2`, lite_malloc.c).
-        if size > usize::MAX / 2 {
+        if oversize(size) {
             set_oom();
             return null_mut();
         }
@@ -445,7 +458,7 @@ pub unsafe extern "C" fn realloc(p: *mut c_void, n: usize) -> *mut c_void {
         if p.is_null() {
             return malloc(n);
         }
-        if n > usize::MAX / 2 {
+        if oversize(n) {
             set_oom();
             return null_mut();
         }
@@ -536,6 +549,13 @@ pub unsafe extern "C" fn posix_memalign(
 #[no_mangle]
 pub unsafe extern "C" fn memalign(alignment: usize, size: usize) -> *mut c_void {
     unsafe {
+        // Impossible ceilings wrap to 0; the opaque gate rejects them
+        // before the pow2 rounding below can hand `aligned_body` an
+        // under-aligned request.
+        if oversize(alignment) {
+            set_oom();
+            return null_mut();
+        }
         // Bit-trick pow2 ceiling (no version-sensitive helpers). A wrapped
         // ceiling (absurd input) would silently under-align SIMD/page
         // tricks downstream: fail clean instead.
@@ -589,6 +609,17 @@ mod tests {
             assert!(!b.is_null());
             free(b as *mut core::ffi::c_void);
         }
+    }
+
+    /// Pins the gate the entry points lean on, so a future inlining of
+    /// [`oversize`] regresses here instead of showing up as a mysterious
+    /// non-NULL from `malloc(usize::MAX)` at `-O2`.
+    #[test]
+    fn oversize_rejects_impossible_sizes() {
+        assert!(oversize(usize::MAX));
+        assert!(oversize(usize::MAX / 2 + 1));
+        assert!(!oversize(usize::MAX / 2));
+        assert!(!oversize(64));
     }
 
     #[test]
