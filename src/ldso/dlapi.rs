@@ -295,7 +295,11 @@ pub extern "C" fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void
 /// return address musl's trampoline fetched.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
-pub extern "C" fn __dlsym(handle: *mut c_void, name: *const c_char, ra: usize) -> *mut c_void {
+pub unsafe extern "C" fn __dlsym(
+    handle: *mut c_void,
+    name: *const c_char,
+    ra: usize,
+) -> *mut c_void {
     unsafe { do_dlsym(handle, name, ra) }
 }
 
@@ -317,10 +321,8 @@ mod tests {
             while *first.add(n) != 0 {
                 n += 1;
             }
-            assert_eq!(
-                unsafe { core::slice::from_raw_parts(first as *const u8, 6) },
-                b"boom\0"
-            );
+            let bytes = unsafe { core::slice::from_raw_parts(first as *const u8, 6) };
+            assert_eq!(bytes, b"boom\0");
             assert!(dlerror().is_null(), "flag cleared by the first read");
         }
     }
