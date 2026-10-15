@@ -150,7 +150,7 @@ pub unsafe fn load_direct_deps(p: *mut Dso, load: LoadFn) -> bool {
         if !(*p).deps.is_null() {
             return true;
         }
-        let is_head = (*p) == addr_of!(HEAD).read();
+        let is_head = core::ptr::eq(*p, addr_of!(HEAD).read());
         let mut cnt = 0usize;
         let needed = count_needed(p);
         cnt += needed;
@@ -173,13 +173,13 @@ pub unsafe fn load_direct_deps(p: *mut Dso, load: LoadFn) -> bool {
         // runtime failure path; everything else, a plain library with
         // zero deps included, allocates one terminator slot.
         if is_head && cnt < 2 {
-            (*p).deps = addr_of_mut!(BUILTIN_DEPS);
+            (*p).deps = addr_of_mut!(BUILTIN_DEPS).cast::<*mut Dso>();
         } else {
             let slots = unsafe { crate::malloc::calloc(cnt + 1, size_of::<*mut Dso>()) };
             if slots.is_null() {
                 // musl prints and (at startup) keeps going into a NULL
                 // `deps`; we stop before that and report the failure.
-                (*p).deps = addr_of_mut!(NO_DEPS);
+                (*p).deps = addr_of_mut!(NO_DEPS).cast::<*mut Dso>();
                 return false;
             }
             (*p).deps = slots as *mut *mut Dso;
@@ -265,7 +265,7 @@ pub unsafe fn load_deps(from: *mut Dso, load: LoadFn) -> bool {
 pub unsafe fn add_syms(p: *mut Dso) {
     unsafe {
         let st = addr_of!(SYMS_TAIL).read();
-        if (*p).syms_next.is_null() && st != p {
+        if (*p).syms_next.is_null() && !core::ptr::eq(st, p) {
             (*st).syms_next = p;
             addr_of_mut!(SYMS_TAIL).write(p);
         }
@@ -307,7 +307,7 @@ pub unsafe fn find_by_shortname(name: *const c_char) -> *mut Dso {
         // by this layer.
         let mut k = 0usize;
         while *name.wrapping_add(k) != 0 {
-            if *name.wrapping_add(k) == b'/' {
+            if *name.wrapping_add(k) == b'/' as c_char {
                 return null_mut();
             }
             k += 1;
@@ -437,9 +437,9 @@ mod tests {
             let mut c = zeroed_dso();
             let mut d = zeroed_dso();
 
-            let app_str = *b"libB.so\0libC.so\0\0";
-            let b_str = *b"libD.so\0\0\0\0";
-            let empty = [0u8; 8];
+            let mut app_str = *b"libB.so\0libC.so\0\0";
+            let mut b_str = *b"libD.so\0\0\0\0";
+            let mut empty = [0u8; 8];
             let mut app_dyn = [DT_NEEDED, 0usize, DT_NEEDED, 6usize, DT_NULL, 0];
             let mut one_need = [DT_NEEDED, 0usize, DT_NULL, 0];
             let none = [DT_NULL, 0usize];
@@ -500,7 +500,7 @@ mod tests {
             let mut app = zeroed_dso();
             let mut b = zeroed_dso();
             let app_str = *b"libB.so\0\0\0\0\0";
-            let empty = [0u8; 8];
+            let mut empty = [0u8; 8];
             let mut app_dyn = [DT_NEEDED, 0usize, DT_NULL, 0];
             app.name = app_str.as_ptr() as *mut c_char;
             app.strings = app_str.as_mut_ptr() as *mut c_char;
@@ -537,8 +537,8 @@ mod tests {
             unregister_all();
             let mut app = zeroed_dso();
             let mut b = zeroed_dso();
-            let strs = *b"libMissing.so\0libB.so\0\0";
-            let empty = [0u8; 8];
+            let mut strs = *b"libMissing.so\0libB.so\0\0";
+            let mut empty = [0u8; 8];
             let mut needs = [DT_NEEDED, 0usize, DT_NEEDED, 13usize, DT_NULL, 0];
             app.name = strs.as_ptr() as *mut c_char;
             app.strings = strs.as_mut_ptr() as *mut c_char;
@@ -604,7 +604,7 @@ mod tests {
             unregister_all();
             let mut app = zeroed_dso();
             let mut lib = zeroed_dso();
-            let empty = [0u8; 8];
+            let mut empty = [0u8; 8];
             let mut none = [DT_NULL, 0usize];
             app.name = empty.as_mut_ptr() as *mut c_char;
             app.shortname = b"app.bin".as_ptr() as *mut c_char;
