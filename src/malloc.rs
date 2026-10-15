@@ -348,17 +348,22 @@ fn set_err(e: c_int) {
     }
 }
 
-// Oversize sizes in tests must be opaque to the optimizer.
+// Oversize tests: both the size and the result must be opaque.
 //
-// `malloc(SIZE_MAX)` with a *constant* argument is not a call the
-// compiler has to honour: the size exceeds the largest justified object
-// size, so LLVM folds the call away before the body runs and the result
-// is `undef` — and `undef.is_null()` may be either. That is why
-// `edge_contracts_match_musl` failed only at `-O2`, and why adding any
-// statement that let the pointer escape (an `eprintln!`) made it pass:
-// the fold stopped and the real gate returned NULL. Not a zlibc bug, a
-// malformed assertion. GCC folds it the same way (hence
-// `-Walloc-size-larger-than`), and glibc answers NULL too.
+// Our entry points carry the exact LibFunc names LLVM recognizes
+// (`malloc`, `calloc`, `realloc`, `memalign`), so caller-side `-O2`
+// applies the allocation-size analysis: a call whose size may exceed
+// `isize::MAX` yields `undef`, and `undef.is_null()` may then be either.
+// That is what made `edge_contracts_match_musl` fail at `-O2` while
+// passing at `-O0` — and why adding a second use of the pointer (an
+// `eprintln!`, or the assert message) changed the verdict. The emitted
+// `malloc` is a correct 4-instruction wrapper around `aligned_body`
+// (verified by disassembly); nothing in zlibc is wrong here.
+//
+// `black_box` on the argument keeps the call real, `black_box` on the
+// result stops LLVM from folding the null test itself. GCC folds the
+// call the same way (`-Walloc-size-larger-than`) and glibc still
+// answers NULL, so the runtime contract is unchanged.
 
 /// Shared engine for every entry point (lock inside): `size` payload
 /// bytes at `alignment` (power of two, ≥ 16), one arena refill on miss.
@@ -387,16 +392,6 @@ unsafe fn aligned_body(alignment: usize, size: usize) -> *mut c_void {
         }
         out as *mut c_void
     }
-}
-
-/// DIAG (transient): call the exported entry point from an opaque frame,
-/// to tell "our `malloc` misbehaves at -O2" from "the compiler rewrote
-/// the call site". `#[cfg(test)]`-free on purpose: dead code is an error
-/// in this crate, and the probe only exists for the release bisect.
-#[cfg(test)]
-#[inline(never)]
-pub(crate) unsafe fn malloc_probe(n: usize) -> *mut c_void {
-    unsafe { malloc(n) }
 }
 
 /// Allocate `n` bytes (musl `malloc`, `src/malloc/mallocng/malloc.c`
@@ -616,16 +611,15 @@ mod tests {
 
     #[test]
     fn engine_rejects_oversize_directly() {
+        // The engine is not a LibFunc name, so it is immune to the
+        // allocation-size folding described above: this is where the
+        // oversize contract is genuinely verified, entry points or not.
         unsafe {
-            let p = super::aligned_body(16, black_box(usize::MAX));
-            assert!(p.is_null(), "engine(SIZE_MAX) = {:p}", p);
-            let q = super::aligned_body(16, black_box(usize::MAX / 2 + 1));
-            assert!(q.is_null(), "engine(MAX/2+1) = {:p}", q);
+            assert!(black_box(super::aligned_body(16, black_box(usize::MAX))).is_null());
+            assert!(black_box(super::aligned_body(16, black_box(usize::MAX / 2 + 1))).is_null());
             let r = super::aligned_body(16, black_box(64));
-            assert!(!r.is_null(), "engine(64) = {:p}", r);
+            assert!(!r.is_null());
             free(r);
-            let m = super::malloc_probe(black_box(usize::MAX));
-            assert!(m.is_null(), "probe(malloc)(SIZE_MAX) = {:p}", m);
         }
     }
 
@@ -639,17 +633,12 @@ mod tests {
             free(z);
             // free(NULL) is a no-op.
             free(null_mut());
-            // Oversize fails clean, never panics. `black_box` keeps the argument
-            // opaque so the call is real (see the note above
-            // `aligned_body`), not folded to `undef`.
-            let o = malloc(black_box(usize::MAX));
-            assert!(o.is_null(), "malloc(MAX) = {:p}", o);
-            let o2 = malloc(black_box(usize::MAX / 2 + 1));
-            assert!(o2.is_null(), "malloc(MAX/2+1) = {:p}", o2);
-            let c = calloc(black_box(usize::MAX), black_box(2));
-            assert!(c.is_null(), "calloc(MAX,2) = {:p}", c);
-            let r = realloc(null_mut(), black_box(usize::MAX));
-            assert!(r.is_null(), "realloc(null,MAX) = {:p}", r);
+            // Oversize fails clean, never panics. Both sides black_boxed: see
+            // the note above `aligned_body`.
+            assert!(black_box(malloc(black_box(usize::MAX))).is_null());
+            assert!(black_box(malloc(black_box(usize::MAX / 2 + 1))).is_null());
+            assert!(black_box(calloc(black_box(usize::MAX), black_box(2))).is_null());
+            assert!(black_box(realloc(null_mut(), black_box(usize::MAX))).is_null());
         }
     }
 
@@ -787,10 +776,9 @@ mod tests {
     #[test]
     fn memalign_huge_alignment_fails_clean() {
         unsafe {
-            let m = memalign(black_box(usize::MAX), 64);
-            assert!(m.is_null(), "memalign(MAX,64) = {:p}", m);
+            assert!(black_box(memalign(black_box(usize::MAX), 64)).is_null());
             let a = aligned_alloc(64, 64);
-            assert!(!a.is_null(), "aligned_alloc(64,64) = {:p}", a);
+            assert!(!a.is_null());
             free(a);
         }
     }
