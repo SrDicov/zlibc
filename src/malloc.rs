@@ -578,7 +578,9 @@ pub unsafe extern "C" fn memalign(alignment: usize, size: usize) -> *mut c_void 
 
 #[cfg(test)]
 mod tests {
-    use super::{aligned_alloc, calloc, free, malloc, memalign, posix_memalign, realloc, EINVAL};
+    use super::{
+        aligned_alloc, calloc, free, malloc, memalign, oversize, posix_memalign, realloc, EINVAL,
+    };
     use core::ptr::null_mut;
 
     unsafe fn sum(p: *mut u8, n: usize) -> usize {
