@@ -50,17 +50,29 @@ static mut BUILTIN_DEPS: [*mut Dso; 2] = [null_mut(), null_mut()];
 pub type LoadFn = unsafe fn(name: *const c_char, needed_by: *mut Dso) -> *mut Dso;
 
 /// Current namespace head (musl `head`).
-pub fn head() -> *mut Dso {
+/// # Safety
+///
+/// The namespace must be initialized; the returned pointer is only
+/// meaningful while it is.
+pub unsafe fn head() -> *mut Dso {
     unsafe { addr_of!(HEAD).read() }
 }
 
 /// Current namespace tail (musl `tail`).
-pub fn tail() -> *mut Dso {
+/// # Safety
+///
+/// The namespace must be initialized; the returned pointer is only
+/// meaningful while it is.
+pub unsafe fn tail() -> *mut Dso {
     unsafe { addr_of!(TAIL).read() }
 }
 
 /// Current global-scope tail (musl `syms_tail`).
-pub fn syms_tail() -> *mut Dso {
+/// # Safety
+///
+/// The namespace must be initialized; the returned pointer is only
+/// meaningful while it is.
+pub unsafe fn syms_tail() -> *mut Dso {
     unsafe { addr_of!(SYMS_TAIL).read() }
 }
 
@@ -175,7 +187,7 @@ pub unsafe fn load_direct_deps(p: *mut Dso, load: LoadFn) -> bool {
         if is_head && cnt < 2 {
             (*p).deps = addr_of_mut!(BUILTIN_DEPS).cast::<*mut Dso>();
         } else {
-            let slots = unsafe { crate::malloc::calloc(cnt + 1, size_of::<*mut Dso>()) };
+            let slots = crate::malloc::calloc(cnt + 1, size_of::<*mut Dso>());
             if slots.is_null() {
                 // musl prints and (at startup) keeps going into a NULL
                 // `deps`; we stop before that and report the failure.
