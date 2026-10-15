@@ -612,7 +612,11 @@ mod tests {
                 "memalign MAX = {:p}",
                 memalign(usize::MAX, 64)
             );
-            assert!(calloc(usize::MAX, 2).is_null(), "calloc = {:p}", calloc(usize::MAX, 2));
+            assert!(
+                calloc(usize::MAX, 2).is_null(),
+                "calloc = {:p}",
+                calloc(usize::MAX, 2)
+            );
             assert!(
                 realloc(null_mut(), usize::MAX).is_null(),
                 "realloc = {:p}",
