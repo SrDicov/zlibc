@@ -157,6 +157,10 @@ fn getenv_in(envp: *const *mut c_char, name: *const c_char) -> *const c_char {
 }
 
 /// musl `getenv` (`src/env/getenv.c`).
+///
+/// # Safety
+///
+/// `name` must be a valid NUL-terminated string.
 #[cfg(not(test))]
 #[no_mangle]
 pub unsafe extern "C" fn getenv(name: *const c_char) -> *mut c_char {
@@ -481,6 +485,7 @@ crate::weak_alias!(__libc_start_init, __start_dummy);
 #[cfg(test)]
 mod tests {
     use super::{auxv_fill, getenv_in, progname_short, AT_HWCAP, AT_NULL, AT_PAGESZ, AUX_CNT};
+    use core::ffi::c_char;
 
     fn fill(words: &[usize]) -> [usize; AUX_CNT] {
         let mut table = [0usize; AUX_CNT];
