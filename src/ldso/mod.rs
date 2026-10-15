@@ -9,6 +9,7 @@
 //! `crate::syscall::SYS_WRITE` until they are generated from
 //! `arch/x86_64/bits/`.
 
+pub mod boot;
 pub mod dlapi;
 pub mod dlstart;
 pub mod dso;
