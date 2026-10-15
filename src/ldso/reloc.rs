@@ -152,7 +152,7 @@ pub(crate) unsafe fn diag_calloc_null(slots: usize, each: usize, is_head: bool, 
         let mut buf = [0u8; 96];
         let msg = b"DIAG dep calloc failed slots=";
         let mut n = 0usize;
-        let mut put = |src: &[u8], buf: &mut [u8], n: &mut usize| {
+        let put = |src: &[u8], buf: &mut [u8], n: &mut usize| {
             for byte in src {
                 if *n < buf.len() {
                     buf[*n] = *byte;
@@ -161,7 +161,7 @@ pub(crate) unsafe fn diag_calloc_null(slots: usize, each: usize, is_head: bool, 
             }
         };
         put(msg, &mut buf, &mut n);
-        let mut num = |v: usize, buf: &mut [u8], n: &mut usize| {
+        let num = |v: usize, buf: &mut [u8], n: &mut usize| {
             let mut tmp = [0u8; 20];
             let mut k = 0usize;
             let mut v = v;
