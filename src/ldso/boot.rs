@@ -202,21 +202,213 @@ pub unsafe fn dynlink_boot(aux: &[usize; AUX_CNT], app: *mut Dso, load: LoadFn) 
     }
 }
 
-/// Dependency loader placeholder wired into the boot sequence.
+/// The loader's own shared object (musl `ldso`, `dynlink.c:145-158`).
+/// Its `name` is what a `DT_NEEDED: libc.so` must resolve to.
+pub static mut LDSO: Dso = unsafe { core::mem::zeroed() };
+
+/// musl's reserved self-names (`dynlink.c:1077-1079`): after a leading
+/// `lib`, these dot-separated prefixes are the loader itself, and an
+/// attempt to "load" one is a hit, not a second copy.
 ///
-/// The full `load_library` (path search, rpath, `LD_LIBRARY_PATH`, inode
-/// dedup against a fresh `open`+`fstat`) is the next packet; until then a
-/// boot with `DT_NEEDED` entries reports the missing name and continues,
-/// which is musl's startup behaviour: an unresolvable dependency is
-/// fatal at startup, but the walk itself keeps going (`dynlink.c:1288`).
+/// ```text
+/// libc.so  libpthread.so  librt.so  libm.so  libdl.so  libutil.so  libxnet.so
+/// ```
+///
+/// This is what lets a musl-linked binary keep its `DT_NEEDED: libc.so`
+/// when the libc *is* us.
+#[cfg(target_arch = "x86_64")]
+/// musl's is a C string literal, so it carries the implicit NUL the
+/// loop below terminates on; a Rust byte literal does not.
+const RESERVED: &[u8] = b"c.pthread.rt.m.dl.util.xnet.\0";
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn is_self(name: *const c_char) -> bool {
+    unsafe {
+        // musl reads name[0..2] before any length check; a 1- or 2-char
+        // name stays inside the terminator, so this is safe (`:1075`).
+        if *name != b'l' as c_char
+            || *name.add(1) != b'i' as c_char
+            || *name.add(2) != b'b' as c_char
+        {
+            return false;
+        }
+        let rest = name.add(3);
+        let mut rp = 0usize;
+        while RESERVED[rp] != 0 {
+            // musl's `next = strchr(rp,'.') + 1` makes the compared
+            // segment include its trailing dot, so `c.` is the unit and
+            // `libc` (no dot) does not match it.
+            let seg_len = {
+                let mut n = rp;
+                while RESERVED[n] != b'.' && RESERVED[n] != 0 {
+                    n += 1;
+                }
+                n + 1 - rp
+            };
+            let mut same = true;
+            for k in 0..seg_len {
+                if *rest.add(k) as u8 != RESERVED[rp + k] {
+                    same = false;
+                    break;
+                }
+            }
+            if same {
+                return true;
+            }
+            // `seg_len` already covers the dot, so this lands on the
+            // next segment — and on the NUL for the last one.
+            rp += seg_len;
+        }
+        false
+    }
+}
+
+/// The loader's own name, used for the `!strcmp(name, ldso.name)` arm of
+/// the self check (`dynlink.c:1100`).
+#[cfg(target_arch = "x86_64")]
+fn ldso_name() -> *mut c_char {
+    c"libc.so".as_ptr() as *mut c_char
+}
+
+/// musl `load_library` (`dynlink.c:1057-1260`), minus the search-path
+/// machinery (`LD_LIBRARY_PATH`, `DT_RPATH`, `/etc/ld-musl-*.path`): the
+/// self-name check, both dedup layers, open, `map_object`, link.
+///
+/// The search paths are the remaining gap and are additive: a name with
+/// a `/` is opened directly, and a bare soname is only satisfied by an
+/// object already in the namespace, exactly like musl after its
+/// shortname layer.
 ///
 /// # Safety
 ///
 /// Contract of [`LoadFn`].
-pub unsafe fn load_library(_name: *const c_char, _needed_by: *mut Dso) -> *mut Dso {
+#[cfg(target_arch = "x86_64")]
+pub unsafe fn load_library(name: *const c_char, _needed_by: *mut Dso) -> *mut Dso {
     unsafe {
-        super::dlapi::set_error(b"cannot open shared object");
-        null_mut()
+        if *name == 0 {
+            return null_mut();
+        }
+        let me = core::ptr::addr_of_mut!(LDSO);
+        // `libc.so` is already in RESERVED, so musl's extra
+        // `!strcmp(name, ldso.name)` arm (`:1100`) is redundant for our
+        // own name and is not replicated.
+        if is_self(name) {
+            (*me).name = ldso_name();
+            if (*me).shortname.is_null() {
+                (*me).shortname = ldso_name();
+            }
+            // Link ourselves in once (`dynlink.c:1101-1108`): the list
+            // must exist first, so an empty namespace means the boot has
+            // not seeded it and there is nothing to append to.
+            if !linkmap::head().is_null() && !self_is_linked() {
+                linkmap::append_namespace(me);
+            }
+            return me;
+        }
+        // Layer 2: already-loaded short name. `find_by_shortname`
+        // refuses names containing a `/` on its own.
+        let hit = linkmap::find_by_shortname(name);
+        if !hit.is_null() {
+            return hit;
+        }
+        // Layer 3: same file, different path.
+        let fd = super::dso::open_object(name);
+        if fd < 0 {
+            super::dlapi::set_error(b"cannot open shared object");
+            return null_mut();
+        }
+        let Some((st_dev, st_ino)) = stat_key(fd) else {
+            super::dso::close_object(fd);
+            return null_mut();
+        };
+        let hit = linkmap::find_by_inode(st_dev, st_ino);
+        if !hit.is_null() {
+            super::dso::close_object(fd);
+            return hit;
+        }
+        // musl allocates the struct plus the name in one block
+        // (`:1209`); the trailing name is what `dso->name` points at.
+        let name_len = super::reloc::c_strlen(name);
+        let block = crate::malloc::malloc(size_of::<Dso>() + name_len + 1);
+        if block.is_null() {
+            super::dso::close_object(fd);
+            super::dlapi::set_error(b"cannot allocate dso");
+            return null_mut();
+        }
+        let p = block as *mut Dso;
+        let name_ptr = (block as *mut u8).add(size_of::<Dso>()).cast::<c_char>();
+        crate::mem::memcpy(
+            name_ptr.cast::<core::ffi::c_void>(),
+            name.cast::<core::ffi::c_void>(),
+            name_len + 1,
+        );
+        (*p).name = name_ptr;
+        (*p).dev = st_dev;
+        (*p).ino = st_ino;
+        if super::dso::map_object(fd, p) != 0 {
+            crate::malloc::free(block);
+            super::dso::close_object(fd);
+            super::dlapi::set_error(b"cannot map shared object");
+            return null_mut();
+        }
+        super::dso::close_object(fd);
+        (*p).shortname = last_component(name_ptr);
+        linkmap::append_namespace(p);
+        p
+    }
+}
+
+/// `fstat`'s `(st_dev, st_ino)`: the only two `struct stat` fields the
+/// loader's dedup key reads (`dynlink.c:1174`). They sit at offsets 0
+/// and 8 of the kernel struct (`arch/x86_64/bits/stat.h`); nothing else
+/// in the loader uses `struct stat`, so the rest is not modelled.
+///
+/// # Safety
+///
+/// `fd` must be an open descriptor.
+#[cfg(target_arch = "x86_64")]
+unsafe fn stat_key(fd: c_int) -> Option<(u64, u64)> {
+    let mut buf = [0u8; 16];
+    if crate::__syscall!(super::SYS_FSTAT, fd, buf.as_mut_ptr()) < 0 {
+        return None;
+    }
+    Some((
+        u64::from_ne_bytes(buf[0..8].try_into().unwrap()),
+        u64::from_ne_bytes(buf[8..16].try_into().unwrap()),
+    ))
+}
+
+/// True when `LDSO` already sits in the namespace list.
+#[cfg(target_arch = "x86_64")]
+fn self_is_linked() -> bool {
+    let me = core::ptr::addr_of_mut!(LDSO);
+    unsafe {
+        let mut p = linkmap::head();
+        while !p.is_null() {
+            if core::ptr::eq(p, me) {
+                return true;
+            }
+            p = (*p).next;
+        }
+        false
+    }
+}
+
+/// musl sets `shortname` only when the resolved path differed from the
+/// requested name (`dynlink.c:1230`), so an explicit pathname can never
+/// be found by the shortname layer later.
+#[cfg(target_arch = "x86_64")]
+fn last_component(path: *mut c_char) -> *mut c_char {
+    unsafe {
+        let mut best = path;
+        let mut p = path;
+        while *p != 0 {
+            if *p == b'/' as c_char {
+                best = p.add(1);
+            }
+            p = p.add(1);
+        }
+        best
     }
 }
 
@@ -225,6 +417,12 @@ mod tests {
     use super::*;
     use crate::ldso::testlock::lock;
     use crate::ldso::{AT_BASE, DT_NULL};
+
+    /// NUL-terminated copy of a Rust string, for the `*const c_char`
+    /// entry points.
+    fn c_str(s: &str) -> std::ffi::CString {
+        std::ffi::CString::new(s).unwrap()
+    }
 
     /// Loader that refuses everything: the walk must still terminate and
     /// the namespace must still contain the program.
@@ -275,6 +473,35 @@ mod tests {
             // Second call is a no-op: the guard, not a double relocation.
             reloc_all(null_mut(), &mut dso as *mut Dso, true);
             assert_eq!(dso.relocated, 1);
+        }
+    }
+
+    /// The reserved-name table is the whole reason a musl-linked
+    /// binary keeps working: its `DT_NEEDED: libc.so` must resolve to
+    /// *us*, not to a second copy of ourselves. musl matches the
+    /// dot-separated segments of `c.pthread.rt.m.dl.util.xnet.` after a
+    /// leading `lib` (`dynlink.c:1075-1097`), so `libm.so` hits and
+    /// `libfoo.so` must not.
+    #[test]
+    fn reserved_names_resolve_to_the_loader_itself() {
+        // musl's check is a segment *prefix* match, not equality: it
+        // compares `name+3` against `"c."` and so also claims
+        // `libc.so.1`. Reproduced rather than corrected — a program that
+        // depends on `libc.so.1` wants us anyway.
+        for yes in [
+            "libc.so",
+            "libc.so.1",
+            "libpthread.so",
+            "librt.so",
+            "libm.so",
+            "libdl.so",
+            "libutil.so",
+            "libxnet.so",
+        ] {
+            assert!(unsafe { is_self(c_str(yes).as_ptr()) }, "{yes} is us");
+        }
+        for no in ["libfoo.so", "libz.so", "lib", "li", "l", "", "libc"] {
+            assert!(!unsafe { is_self(c_str(no).as_ptr()) }, "{no} is not us");
         }
     }
 

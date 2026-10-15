@@ -407,8 +407,21 @@ use-after-unmap nondeterminista.
   are both `u32` and share the first word. Hand-computing an ELF stride
   wrong makes a phdr scan silently read the wrong field, which is exactly
   the kind of bug a fixture with one header cannot catch.
-  Next: real `load_library` (self-name check + path search + inode dedup)
-  and then the 6E musl-gcc gate.
+  Packet DONE: real `load_library` — self-name check, both dedup
+  layers, open, `map_object`, link. The self-name table is the gate
+  that makes a musl-linked binary work at all: its `DT_NEEDED: libc.so`
+  has to resolve to *us*, and musl's check (`dynlink.c:1075-1097`) is a
+  **prefix** match on dot-separated segments, so `libc.so.1` is us too.
+  Reproduced verbatim rather than "corrected". Still missing: the
+  search paths (`LD_LIBRARY_PATH`, `DT_RPATH`, `/etc/ld-musl-*.path`),
+  which are additive — a name with a `/` already works.
+  Lessons: musl's C string literal `reserved` has an implicit NUL that
+  a Rust byte literal does not, and its `strchr(rp,'.')+1` means each
+  compared segment **includes** its trailing dot (so `libc` alone is not
+  a hit). `sizeof(Elf64Phdr)` is 56, and `struct stat` is only modelled
+  as far as the two fields the dedup key reads — offsets 0 and 8, named
+  in the doc rather than guessed.
+  Next: the 6E musl-gcc gate.
 - **Audit batch (v0.11, all green, 73 tests):** three parallel audits,
   every load-bearing finding fixed + tested — pre-clone registry link
   (detached-child UAF), honest `raw_clone` clobbers, magic-gated canary,
