@@ -317,7 +317,7 @@ mod tests {
     /// order: every test starts by draining whatever the previous one
     /// left behind, so "no pending error" really means that.
     fn drain() {
-        drop(dlerror());
+        let _ = dlerror();
     }
 
     /// `dlerror` hands the message out exactly once (musl `dlerror.c:14-18`).
