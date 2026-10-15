@@ -719,6 +719,7 @@ mod tests {
             .arg("--exact")
             .arg("malloc::tests::double_free_aborts")
             .arg("--test-threads=1")
+            .arg("--nocapture")
             .status()
             .unwrap();
         assert!(!st.success());
@@ -740,6 +741,7 @@ mod tests {
             .arg("--exact")
             .arg("malloc::tests::foreign_free_aborts")
             .arg("--test-threads=1")
+            .arg("--nocapture")
             .status()
             .unwrap();
         assert!(!st.success());
