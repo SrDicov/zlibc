@@ -35,6 +35,7 @@ pub const AT_EUID: usize = 12; // include/elf.h:1015
 pub const AT_GID: usize = 13; // include/elf.h:1016
 pub const AT_EGID: usize = 14; // include/elf.h:1017
 pub const AT_HWCAP: usize = 16; // include/elf.h:1022
+pub const AT_EXECFN: usize = 31; // include/elf.h:1037
 pub const AT_SECURE: usize = 23; // include/elf.h:1038
 pub const AT_RANDOM: usize = 25; // include/elf.h:1042
 
@@ -82,6 +83,24 @@ pub static mut __libc: Libc = Libc {
 #[cfg(not(test))]
 #[no_mangle]
 pub static mut __hwcap: usize = 0;
+
+/// musl `char *__progname/__progname_full` (`src/internal/libc.c:6`),
+/// initialized from `argv[0]` in [`__init_libc`].
+#[cfg(not(test))]
+#[no_mangle]
+pub static mut __progname: *mut c_char = core::ptr::null_mut();
+/// musl `char *__progname_full` (`src/internal/libc.c:6`): `argv[0]` whole.
+#[cfg(not(test))]
+#[no_mangle]
+pub static mut __progname_full: *mut c_char = core::ptr::null_mut();
+
+// musl `src/internal/libc.c:8-9`: both pointers are also visible under
+// their `program_invocation_*` names. `weak_alias!` is plain `.weak` +
+// `.set`, so it aliases data exactly like functions.
+#[cfg(not(test))]
+crate::weak_alias!(__progname, program_invocation_short_name);
+#[cfg(not(test))]
+crate::weak_alias!(__progname_full, program_invocation_name);
 
 /// musl `src/env/__stack_chk_fail.c:5` (`uintptr_t __stack_chk_guard`).
 #[cfg(not(test))]
@@ -178,10 +197,34 @@ unsafe fn libc_start_main_stage2(
     unsafe { exit(main(argc, argv, envp)) }
 }
 
+/// Basename scan for [`__progname`] (musl `__libc_start_main.c:37`):
+/// advance past every `/`, so `__progname` points just after the last
+/// one. Pure over the string, which is what makes it unit-testable —
+/// `__init_libc` itself writes process-global state and stays out of
+/// tests, like the rest of this module's runtime half.
+///
+/// # Safety
+///
+/// `pn` must be a valid NUL-terminated string.
+fn progname_short(pn: *const c_char) -> *const c_char {
+    unsafe {
+        let mut short = pn;
+        let mut p = pn;
+        while *p != 0 {
+            if *p == b'/' as c_char {
+                short = p.add(1);
+            }
+            p = p.add(1);
+        }
+        short
+    }
+}
+
 /// musl `__init_libc` (src/env/__libc_start_main.c:23-57), reduced to the
 /// Wave 2 contract: envp→auxv scan, `__hwcap`, page size, `__init_ssp`
-/// from `AT_RANDOM`, and the set-uid/set-gid/`AT_SECURE` early-return check
-/// (lines 42-43). Deferred: `__environ`/`__progname` (Wave 4 owns them),
+/// from `AT_RANDOM`, `__progname`/`__progname_full` from `argv[0]`, and
+/// the set-uid/set-gid/`AT_SECURE` early-return check (lines 42-43).
+/// Deferred: `__environ` (needs no loader state, still unwired),
 /// `__init_tls` (Wave 3 owns the TP), `__sysinfo` (vdso, with B2/B3).
 ///
 /// # Safety
@@ -191,7 +234,7 @@ unsafe fn libc_start_main_stage2(
 /// must be a valid string; it is currently unused.
 #[cfg(not(test))]
 #[no_mangle]
-pub unsafe extern "C" fn __init_libc(envp: *mut *mut c_char, _pn: *const c_char) {
+pub unsafe extern "C" fn __init_libc(envp: *mut *mut c_char, pn: *const c_char) {
     let mut n = 0usize;
     while !(unsafe { envp.wrapping_add(n).read() }).is_null() {
         n += 1;
@@ -200,6 +243,19 @@ pub unsafe extern "C" fn __init_libc(envp: *mut *mut c_char, _pn: *const c_char)
     unsafe { (*core::ptr::addr_of_mut!(__libc)).auxv = auxv as *mut usize };
     let mut aux = [0usize; AUX_CNT];
     unsafe { auxv_fill(&mut aux, auxv) };
+    // musl `__libc_start_main.c:32-37`: `argv[0]`, else `AT_EXECFN`,
+    // else the empty string; `__progname` stops past the last `/`.
+    let mut full = pn;
+    if full.is_null() {
+        full = aux[AT_EXECFN] as *const c_char;
+    }
+    if full.is_null() {
+        full = c"".as_ptr();
+    }
+    unsafe {
+        core::ptr::addr_of_mut!(__progname_full).write(full as *mut c_char);
+        core::ptr::addr_of_mut!(__progname).write(progname_short(full) as *mut c_char);
+    }
     unsafe { core::ptr::addr_of_mut!(__hwcap).write(aux[AT_HWCAP]) };
     unsafe { (*core::ptr::addr_of_mut!(__libc)).page_size = aux[AT_PAGESZ] };
     unsafe { __init_ssp(aux[AT_RANDOM] as *mut c_void) };
@@ -353,7 +409,7 @@ crate::weak_alias!(__libc_start_init, __start_dummy);
 
 #[cfg(test)]
 mod tests {
-    use super::{auxv_fill, AT_HWCAP, AT_NULL, AT_PAGESZ, AUX_CNT};
+    use super::{auxv_fill, progname_short, AT_HWCAP, AT_NULL, AT_PAGESZ, AUX_CNT};
 
     fn fill(words: &[usize]) -> [usize; AUX_CNT] {
         let mut table = [0usize; AUX_CNT];
@@ -380,5 +436,19 @@ mod tests {
     fn auxv_fill_empty_is_all_zero() {
         let table = fill(&[AT_NULL]);
         assert!(table.iter().all(|&w| w == 0));
+    }
+
+    /// `progname_short` stops past the last `/` (musl
+    /// `__libc_start_main.c:37`); a bare name and the empty string come
+    /// back untouched.
+    #[test]
+    fn progname_short_strips_directories() {
+        let full = c"/usr/bin/foo";
+        let short = unsafe { progname_short(full.as_ptr()) };
+        assert_eq!(short, unsafe { full.as_ptr().add(9) });
+        let bare = c"foo";
+        assert_eq!(unsafe { progname_short(bare.as_ptr()) }, bare.as_ptr());
+        let empty = c"";
+        assert_eq!(unsafe { progname_short(empty.as_ptr()) }, empty.as_ptr());
     }
 }
