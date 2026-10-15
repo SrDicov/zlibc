@@ -278,76 +278,76 @@ fn ldso_name() -> *mut c_char {
 #[cfg(target_arch = "x86_64")]
 pub unsafe fn load_library(name: *const c_char, _needed_by: *mut Dso) -> *mut Dso {
     unsafe {
-    if *name == 0 {
-        return null_mut();
-    }
-    let me = core::ptr::addr_of_mut!(LDSO);
-    // `libc.so` is already in RESERVED, so musl's extra
-    // `!strcmp(name, ldso.name)` arm (`:1100`) is redundant for our
-    // own name and is not replicated.
-    if is_self(name) {
-        (*me).name = ldso_name();
-        if (*me).shortname.is_null() {
-            (*me).shortname = ldso_name();
+        if *name == 0 {
+            return null_mut();
         }
-        // Link ourselves in once (`dynlink.c:1101-1108`): the list
-        // must exist first, so an empty namespace means the boot has
-        // not seeded it and there is nothing to append to.
-        if !linkmap::head().is_null() && !self_is_linked() {
-            linkmap::append_namespace(me);
+        let me = core::ptr::addr_of_mut!(LDSO);
+        // `libc.so` is already in RESERVED, so musl's extra
+        // `!strcmp(name, ldso.name)` arm (`:1100`) is redundant for our
+        // own name and is not replicated.
+        if is_self(name) {
+            (*me).name = ldso_name();
+            if (*me).shortname.is_null() {
+                (*me).shortname = ldso_name();
+            }
+            // Link ourselves in once (`dynlink.c:1101-1108`): the list
+            // must exist first, so an empty namespace means the boot has
+            // not seeded it and there is nothing to append to.
+            if !linkmap::head().is_null() && !self_is_linked() {
+                linkmap::append_namespace(me);
+            }
+            return me;
         }
-        return me;
-    }
-    // Layer 2: already-loaded short name. `find_by_shortname`
-    // refuses names containing a `/` on its own.
-    let hit = linkmap::find_by_shortname(name);
-    if !hit.is_null() {
-        return hit;
-    }
-    // Layer 3: same file, different path.
-    let fd = super::dso::open_object(name);
-    if fd < 0 {
-        super::dlapi::set_error(b"cannot open shared object");
-        return null_mut();
-    }
-    let Some((st_dev, st_ino)) = stat_key(fd) else {
+        // Layer 2: already-loaded short name. `find_by_shortname`
+        // refuses names containing a `/` on its own.
+        let hit = linkmap::find_by_shortname(name);
+        if !hit.is_null() {
+            return hit;
+        }
+        // Layer 3: same file, different path.
+        let fd = super::dso::open_object(name);
+        if fd < 0 {
+            super::dlapi::set_error(b"cannot open shared object");
+            return null_mut();
+        }
+        let Some((st_dev, st_ino)) = stat_key(fd) else {
+            super::dso::close_object(fd);
+            return null_mut();
+        };
+        let hit = linkmap::find_by_inode(st_dev, st_ino);
+        if !hit.is_null() {
+            super::dso::close_object(fd);
+            return hit;
+        }
+        // musl allocates the struct plus the name in one block
+        // (`:1209`); the trailing name is what `dso->name` points at.
+        let name_len = super::reloc::c_strlen(name);
+        let block = crate::malloc::malloc(size_of::<Dso>() + name_len + 1);
+        if block.is_null() {
+            super::dso::close_object(fd);
+            super::dlapi::set_error(b"cannot allocate dso");
+            return null_mut();
+        }
+        let p = block as *mut Dso;
+        let name_ptr = (block as *mut u8).add(size_of::<Dso>()).cast::<c_char>();
+        crate::mem::memcpy(
+            name_ptr.cast::<core::ffi::c_void>(),
+            name.cast::<core::ffi::c_void>(),
+            name_len + 1,
+        );
+        (*p).name = name_ptr;
+        (*p).dev = st_dev;
+        (*p).ino = st_ino;
+        if super::dso::map_object(fd, p) != 0 {
+            crate::malloc::free(block);
+            super::dso::close_object(fd);
+            super::dlapi::set_error(b"cannot map shared object");
+            return null_mut();
+        }
         super::dso::close_object(fd);
-        return null_mut();
-    };
-    let hit = linkmap::find_by_inode(st_dev, st_ino);
-    if !hit.is_null() {
-        super::dso::close_object(fd);
-        return hit;
-    }
-    // musl allocates the struct plus the name in one block
-    // (`:1209`); the trailing name is what `dso->name` points at.
-    let name_len = super::reloc::c_strlen(name);
-    let block = crate::malloc::malloc(size_of::<Dso>() + name_len + 1);
-    if block.is_null() {
-        super::dso::close_object(fd);
-        super::dlapi::set_error(b"cannot allocate dso");
-        return null_mut();
-    }
-    let p = block as *mut Dso;
-    let name_ptr = (block as *mut u8).add(size_of::<Dso>()).cast::<c_char>();
-    crate::mem::memcpy(
-        name_ptr.cast::<core::ffi::c_void>(),
-        name.cast::<core::ffi::c_void>(),
-        name_len + 1,
-    );
-    (*p).name = name_ptr;
-    (*p).dev = st_dev;
-    (*p).ino = st_ino;
-    if super::dso::map_object(fd, p) != 0 {
-        crate::malloc::free(block);
-        super::dso::close_object(fd);
-        super::dlapi::set_error(b"cannot map shared object");
-        return null_mut();
-    }
-    super::dso::close_object(fd);
-    (*p).shortname = last_component(name_ptr);
-    linkmap::append_namespace(p);
-    p
+        (*p).shortname = last_component(name_ptr);
+        linkmap::append_namespace(p);
+        p
     }
 }
 
