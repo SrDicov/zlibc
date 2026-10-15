@@ -428,9 +428,24 @@ use-after-unmap nondeterminista.
   boot-time `DT_NEEDED` resolution. `aux[0]` is a key-presence bitmap
   (`decode_vec` sets bit `v[0]`), so `0x7800` tests keys 11-14 present;
   misreading it as a value concludes `secure` unconditionally, and the
-  pure `secure_from_aux` exists to pin the right reading. Note:
-  `dynlink_boot` is still only exercised by tests — `_dlstart_c`
-  returns the base without chaining into it, which is 6E wiring work.
+  pure `secure_from_aux` exists to pin the right reading.
+  Wiring DONE (`src/ldso/dlstart.rs`): `_dlstart_c` keeps its tested
+  base-returning contract; the chain lives in `_dlstart_boot`
+  (self-relocate → decode our `Dso` → build the program's →
+  `dynlink_boot` → entry), and the naked `_dlstart` restores `sp`
+  from `rbx` and `jmp`s to the returned entry (musl's `CRTJMP`).
+  The three audit points, verified not assumed:
+  (1) FS discipline holds by construction — the boot transitive
+  closure executes no `%fs` reads (`errno` falls back at base 0,
+  `self_tp` never dereferences, malloc's lock is a plain futex; the
+  only `%fs` users run on program execution, post-jump).
+  (2) `DT_NEEDED: libc.so` was already intercepted, but into an empty
+  shell — `_dlstart_boot` now decodes `LDSO` first, so the node has
+  real symbol tables when `load_deps` hits it.
+  (3) No destructive overlap: the boot runs relocs only (no ctors
+  anywhere yet), and `__init_libc` writes disjoint state — but when
+  ctors land, `DT_INIT_ARRAY` ownership (loader vs `__libc_start_main`
+  stage 2) needs the same explicit split, or init runs twice.
   Search-paths packet DONE (`src/ldso/boot.rs`): `LD_LIBRARY_PATH`
   unless `libc.secure`, each `needed_by` ancestor's `RPATH`/`RUNPATH`
   with `$ORIGIN` expansion, then `/lib:/usr/local/lib:/usr/lib` —
