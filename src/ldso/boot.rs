@@ -199,6 +199,12 @@ unsafe fn init_loader_state(envp: *mut *mut c_char, aux: &[usize; AUX_CNT]) {
 #[cfg(test)]
 unsafe fn init_loader_state(_envp: *mut *mut c_char, _aux: &[usize; AUX_CNT]) {}
 
+/// The main program's `Dso` for the live boot path. Unit tests keep
+/// theirs on the stack; the real `_dlstart` chain has no caller frame to
+/// borrow, so the object lives here (musl keeps its `app` the same way:
+/// a function-static `struct dso` in `__dls3`, `dynlink.c:1804`).
+pub static mut APP: Dso = unsafe { core::mem::zeroed() };
+
 /// musl's `__dls3` tail: run every stage the loader needs, then hand back
 /// the program's entry point.
 ///

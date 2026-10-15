@@ -45,6 +45,20 @@ pub struct BootInfo {
 ///
 /// `sp` must be the kernel stack (`argc`, `argc` pointers, NULL, env
 /// strings, NULL, auxv pairs).
+/// `envp` from the kernel stack: `argv` is `sp+1`, `envp` follows the
+/// `argc` pointers plus their terminator (mirrors [`find_auxv`], which
+/// walks one step further to the auxv).
+///
+/// # Safety
+///
+/// `sp` must be the kernel stack.
+pub(crate) unsafe fn envp_from_sp(sp: *const usize) -> *mut *mut core::ffi::c_char {
+    unsafe {
+        let argc = sp.read();
+        sp.add(1 + argc + 1) as *mut *mut core::ffi::c_char
+    }
+}
+
 pub(crate) unsafe fn find_auxv(sp: *const usize) -> *const usize {
     unsafe {
         let argc = sp.read();
@@ -139,12 +153,16 @@ pub(crate) unsafe fn relocate_self(base: usize, dynt: &[usize; DYN_CNT]) {
 
 /// Entry for the kernel/`PT_INTERP` (musl `arch/x86_64/crt_arch.h:1-13`,
 /// translated to Intel asm like the rest of this codebase): `rdi` = the
-/// kernel stack, `rsi` = `_DYNAMIC`, align, call [`_dlstart_c`].
+/// kernel stack, `rsi` = `_DYNAMIC`, align, call [`_dlstart_boot`], then
+/// restore the original stack and jump to the entry it returns (musl's
+/// `CRTJMP`). `rbx` carries `sp` across the call: it is callee-saved, so
+/// the C function cannot clobber it.
 ///
 /// # Safety
 ///
 /// Entered once by the kernel/loader with a valid stack and `_DYNAMIC`;
-/// never call, never return (the `ud2` traps any fallthrough).
+/// never call, never return (a returned entry that faults is the only
+/// way out other than the jump).
 #[cfg(all(not(test), target_arch = "x86_64"))]
 #[unsafe(naked)]
 pub unsafe extern "C" fn _dlstart() {
@@ -153,8 +171,10 @@ pub unsafe extern "C" fn _dlstart() {
         "mov rdi, rsp",
         "lea rsi, [rip + _DYNAMIC]",
         "and rsp, -16",
-        "call _dlstart_c",
-        "ud2",
+        "mov rbx, rdi",
+        "call _dlstart_boot",
+        "mov rsp, rbx",
+        "jmp rax",
     )
 }
 
@@ -209,6 +229,59 @@ pub unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usi
     }
 }
 
+/// Full interpreter entry: self-relocate, decode our own `Dso`, build
+/// the program's, run [`super::boot::dynlink_boot`], return the entry
+/// point for the naked [`_dlstart`] to jump to. This is the
+/// `__dls2`+`__dls3` shape in one function: musl splits them because
+/// stage 2 runs before any `Dso` exists; ours can share `_dlstart_c`
+/// since the base computation is already factored.
+///
+/// Order inside is the load-bearing part (musl `dynlink.c:1802-2081`):
+/// our `Dso` is decoded *before* `dynlink_boot` so a `DT_NEEDED:
+/// libc.so` resolves to a node with real symbol tables, not the empty
+/// shell. `LDSO.relocated` is set because `relocate_self` already
+/// applied our `RELATIVE` entries; non-relative self relocations are
+/// assumed absent — our image links nothing external, so every internal
+/// reference is `RELATIVE`-class. Verify with `readelf -r` the day a
+/// real `cdylib` exists; a non-relative self reloc would need
+/// `reloc_all(LDSO, skip_relative = true)` here.
+///
+/// FS discipline for the cold-boot path (kernel enters with `FS_BASE`
+/// 0): nothing called from here may execute `%fs` reads. It holds:
+/// `errno` falls back to its global cell when the base is 0,
+/// `self_tp` never dereferences, `malloc`'s lock is a plain futex, and
+/// the only `%fs` users (`__tlsdesc_dynamic`, `__tls_get_addr`) run
+/// solely on program execution, after the jump below.
+///
+/// # Safety
+///
+/// `sp` must be the kernel stack; `dynv` the `_DYNAMIC` word vector.
+/// Runs once, before any thread exists.
+#[cfg(all(not(test), target_arch = "x86_64"))]
+#[no_mangle]
+pub unsafe extern "C" fn _dlstart_boot(sp: *const usize, dynv: *const usize) -> usize {
+    unsafe {
+        let base = _dlstart_c(sp, dynv);
+        let ldso = core::ptr::addr_of_mut!(super::boot::LDSO);
+        (*ldso).base = base as *mut u8;
+        (*ldso).dynv = dynv as *mut usize;
+        super::dso::decode_dyn(ldso);
+        (*ldso).relocated = 1;
+        let auxv = find_auxv(sp);
+        let mut aux = [0usize; AUX_CNT];
+        let mut i = 0usize;
+        while *auxv.add(i) != DT_NULL {
+            if *auxv.add(i) < AUX_CNT {
+                aux[*auxv.add(i)] = *auxv.add(i + 1);
+            }
+            i += 2;
+        }
+        let app = core::ptr::addr_of_mut!(super::boot::APP);
+        *app = super::boot::app_dso_from_aux(&aux);
+        super::boot::dynlink_boot(envp_from_sp(sp), &aux, app, super::boot::load_library)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{find_auxv, relocate_self, AT_BASE, AT_NULL, AT_PHDR, AT_PHENT, AT_PHNUM, DT_NULL};
@@ -238,6 +311,31 @@ mod tests {
         let auxv = unsafe { find_auxv(sp.as_ptr()) };
         assert_eq!(auxv as usize, sp.as_ptr() as usize + 6 * size_of::<usize>());
         assert_eq!(unsafe { *auxv }, AT_PHDR);
+    }
+
+    /// `envp` sits past `argv` and its terminator: `sp[0]` is argc,
+    /// `sp[1..1+argc]` the pointers, `sp[1+argc]` NULL, `sp[2+argc]`
+    /// the first environment string.
+    #[test]
+    fn envp_from_sp_skips_argv() {
+        let a0 = c"prog";
+        let a1 = c"--flag";
+        let e0 = c"HOME=/root";
+        let e1 = c"PATH=/bin";
+        let stack: [usize; 8] = [
+            2,
+            a0.as_ptr() as usize,
+            a1.as_ptr() as usize,
+            0,
+            e0.as_ptr() as usize,
+            e1.as_ptr() as usize,
+            0,
+            AT_NULL,
+        ];
+        let envp = unsafe { super::envp_from_sp(stack.as_ptr()) };
+        assert_eq!(envp as usize, e0.as_ptr() as usize);
+        assert_eq!(unsafe { *envp.add(1) } as usize, e1.as_ptr() as usize);
+        assert!(unsafe { (*envp.add(2)).is_null() });
     }
 
     /// Bias from `AT_BASE` (the normal exec path, dlstart.c:104).
