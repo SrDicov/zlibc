@@ -200,29 +200,88 @@ unsafe fn fatal(dso: *const c_char, sym: *const c_char, detail: &[u8]) -> ! {
     }
 }
 
-// ---- TLSDESC placeholder ----------------------------------------------------
+// ---- TLSDESC resolvers (musl src/ldso/x86_64/tlsdesc.s:5-23) ----------------
 
-/// Loud abort for static-TLS `TLSDESC` slot 0 (musl resolves
-/// `__tlsdesc_static` from `src/ldso/x86_64/tlsdesc.s`): the old code
-/// stored a placeholder returning 0 into live slots, silently corrupting
-/// thread addresses. Any call reaching here traps instead of computing
-/// garbage; a real resolver replaces this when dynamic TLS grows one.
-extern "C" fn tlsdesc_static() -> isize {
+/// musl `__tlsdesc_static` (`tlsdesc.s:5-7`): the descriptor is the
+/// relocation site itself, and its second word already holds the final
+/// TPOFF-style offset, so the whole resolver is a load and a return.
+/// `%rax` on entry points at that 2-word cell.
+///
+/// Nudged rather than spelled with `global_asm!`: the label and the
+/// relocation that references it must be emitted under the same name, and
+/// a naked Rust function gives us both plus a symbol for the loader to
+/// store. Same two instructions musl has, same register.
+#[cfg(target_arch = "x86_64")]
+#[unsafe(naked)]
+pub extern "C" fn __tlsdesc_static() -> isize {
+    core::arch::naked_asm!("mov 8(%rax), %rax", "ret")
+}
+
+/// musl `__tlsdesc_dynamic` (`tlsdesc.s:12-23`): the second word of the
+/// cell points at a [`TdIndex`]; `args[0]` is the module id and
+/// `args[1]` the symbol's DTPOFF. The result is
+/// `dtv[modidx] + off - TP`, which is the same TPOFF encoding the static
+/// resolver returns verbatim.
+///
+/// `%fs:8` is `self->dtv`: x86_64 has no `TLS_ABOVE_TP`, so `dtv` sits
+/// at offset 8 of the TCB. `- TP` is required — the TLS ABI result is
+/// thread-pointer relative.
+#[cfg(target_arch = "x86_64")]
+#[unsafe(naked)]
+pub extern "C" fn __tlsdesc_dynamic() -> isize {
+    core::arch::naked_asm!(
+        "mov 8(%rax), %rax",
+        "push %rdx",
+        "mov %fs:8, %rdx",
+        "push %rcx",
+        "mov (%rax), %rcx",
+        "add (%rdx,%rcx,8), %rax",
+        "pop %rcx",
+        "sub %fs:0, %rax",
+        "pop %rdx",
+        "ret",
+    )
+}
+
+/// musl `struct td_index` (`ldso/dynlink.c:62-65`): the payload behind a
+/// dynamic descriptor's second word. `args` is exactly the
+/// `{tls_id, dtpoff}` pair the resolver reads; `next` threads the
+/// records so `dlopen` failure can free them.
+#[cfg(target_arch = "x86_64")]
+#[repr(C)]
+pub struct TdIndex {
+    pub args: [usize; 2],
+    pub next: *mut TdIndex,
+}
+
+/// musl `__tls_get_addr` (`src/thread/__tls_get_addr.c:3-7`):
+/// `self->dtv[v[0]] + v[1]`, an **absolute** pointer. Unlike the
+/// descriptors there is no `- TP` here — `__tls_get_addr` is specified to
+/// return the address, not an offset.
+///
+/// # Safety
+///
+/// `v` must point at two words: a DTV index and an offset.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __tls_get_addr(v: *const usize) -> *mut core::ffi::c_void {
     unsafe {
-        core::arch::asm!("ud2", options(noreturn));
+        let tp = crate::thread::tls::get_tp();
+        let dtv = *tp.cast::<*const *mut usize>().add(1) as *const *mut usize;
+        (dtv.add(*v).read() as usize).wrapping_add(*v.add(1)) as *mut core::ffi::c_void
     }
 }
 
-/// Address of [`tlsdesc_static`], as the `TLSDESC` slot must store it.
+/// Address of [`__tlsdesc_static`], as the `TLSDESC` slot must store it.
 ///
 /// One accessor, so production and tests cannot disagree: at `-O2` LLVM
-/// gave the test module its own copy of this one-`ud2` function, and the
-/// identity assert then compared two distinct addresses (release-only
+/// gave the test module its own copy of a one-instruction function, and
+/// the identity assert then compared two distinct addresses (release-only
 /// failure). The contract is "the slot holds the static-TLS resolver",
 /// not "equals this particular cast expression".
 #[inline(never)]
 fn tlsdesc_static_ptr() -> usize {
-    tlsdesc_static as *const () as usize
+    __tlsdesc_static as *const () as usize
 }
 
 // ---- Symbol lookup (musl ldso/dynlink.c:265-351) ----------------------------
@@ -594,13 +653,30 @@ pub unsafe fn do_relocs(
                         addend
                     };
                     if (*def_dso).tls_id > STATIC_TLS_CNT.load(Ordering::Relaxed) {
-                        // shortcut: musl mallocs td_index (dynlink.c:522-536);
-                        // no allocator until Wave 4.
-                        fatal((*dso).name, name, b"dynamic TLSDESC needs allocator");
+                        // musl dynlink.c:522-535: a module past the
+                        // permanent static boundary needs the dynamic
+                        // resolver, and the descriptor carries a
+                        // `{tls_id, dtpoff}` pair through a `td_index`
+                        // threaded on the owning dso so `dlopen` failure
+                        // can free it.
+                        let new = crate::malloc::malloc(size_of::<TdIndex>())
+                            as *mut TdIndex;
+                        if new.is_null() {
+                            fatal((*dso).name, name, b"out of memory for td_index");
+                        }
+                        (*new).args = [
+                            (*def_dso).tls_id,
+                            tls_val.wrapping_sub((*def_dso).tls.offset).wrapping_add(a),
+                        ];
+                        (*new).next = (*def_dso).td_index;
+                        (*def_dso).td_index = new;
+                        *addr.add(0) = __tlsdesc_dynamic as *const () as usize;
+                        *addr.add(1) = new as usize;
+                    } else {
+                        *addr.add(0) = tlsdesc_static_ptr();
+                        *addr.add(1) =
+                            tls_val.wrapping_sub((*def_dso).tls.offset).wrapping_add(a);
                     }
-                    let desc: usize = tlsdesc_static_ptr();
-                    *addr.add(0) = desc;
-                    *addr.add(1) = tls_val.wrapping_sub((*def_dso).tls.offset).wrapping_add(a);
                 }
                 _ => {
                     fatal((*dso).name, name, b"unsupported relocation type");
@@ -833,7 +909,62 @@ mod tests {
     }
 
     #[test]
-    fn tlsdesc_static_stores_fn_and_offset() {
+    /// A module past `static_tls_cnt` takes the dynamic arm: the slot gets
+/// `__tlsdesc_dynamic` and a `td_index` carrying `{tls_id, dtpoff}`
+/// (musl `dynlink.c:522-535`). This used to be a fatal path, so the
+/// branch had no coverage at all.
+#[test]
+fn tlsdesc_dynamic_stores_index_and_module_id() {
+    unsafe {
+        set_static_tls_cnt(1);
+        let mut mem = [0u8; 64];
+        let base = mem.as_mut_ptr();
+        // tls_id 2 is past the static boundary of 1.
+        let mut syms = [sym(0, 0, 0, 0, 0), sym(0, 0x16, 1, 0x10, 4)];
+        let mut strs = *b"tlsv\0";
+        let mut ht = [0u32; 5];
+        let mut dso: Dso = core::mem::zeroed();
+        dso.tls.offset = 0x40;
+        dso.tls_id = 2;
+        unsafe {
+            sysv_chain(ht.as_mut_ptr(), 1);
+            wire(
+                &mut dso as *mut Dso,
+                base,
+                syms.as_mut_ptr(),
+                strs.as_mut_ptr() as *mut c_char,
+                ht.as_mut_ptr(),
+            );
+        }
+        let mut rela = [0x08usize, info(1, REL_TLSDESC), 6];
+        unsafe {
+            do_relocs(
+                &mut dso as *mut Dso,
+                &mut dso as *mut Dso,
+                rela.as_mut_ptr(),
+                3 * size_of::<usize>(),
+                3,
+                false,
+            )
+        };
+        assert_eq!(
+            unsafe { *at(base, 0x08) },
+            __tlsdesc_dynamic as *const () as usize
+        );
+        let idx = unsafe { *at(base, 0x10) } as *mut TdIndex;
+        assert!(!idx.is_null());
+        // args[0] is the module id, args[1] the DTPOFF: symbol value 0x10
+        // minus the module offset 0x40 plus the addend 6.
+        assert_eq!(unsafe { (*idx).args[0] }, 2);
+        assert_eq!(unsafe { (*idx).args[1] }, 0x10usize.wrapping_sub(0x40).wrapping_add(6));
+        // Threaded for `dlopen` rollback.
+        assert_eq!(unsafe { dso.td_index }, idx);
+        assert!(unsafe { (*idx).next }.is_null());
+    }
+}
+
+#[test]
+fn tlsdesc_static_stores_fn_and_offset() {
         set_static_tls_cnt(1);
         let mut mem = [0u8; 64];
         let base = mem.as_mut_ptr();
