@@ -224,7 +224,10 @@ unsafe fn is_self(name: *const c_char) -> bool {
     unsafe {
         // musl reads name[0..2] before any length check; a 1- or 2-char
         // name stays inside the terminator, so this is safe (`:1075`).
-        if *name != b'l' as c_char || *name.add(1) != b'i' as c_char || *name.add(2) != b'b' as c_char {
+        if *name != b'l' as c_char
+            || *name.add(1) != b'i' as c_char
+            || *name.add(2) != b'b' as c_char
+        {
             return false;
         }
         let rest = name.add(3);
