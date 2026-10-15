@@ -76,7 +76,11 @@ fn self_tp() -> usize {
             core::ptr::addr_of_mut!(base) as usize,
         )
     };
-    if r == 0 { base } else { 0 }
+    if r == 0 {
+        base
+    } else {
+        0
+    }
 }
 
 /// musl `dlerror` (`src/ldso/dlerror.c:13-23`): return the pending
@@ -390,7 +394,8 @@ mod tests {
     /// on the free list, so a 5-byte message must not become a 6-byte
     /// allocation.
     #[test]
-    fn dlerror_buffer_has_the_pointer_floor() {        let _guard = lock();
+    fn dlerror_buffer_has_the_pointer_floor() {
+        let _guard = lock();
         drain();
         unsafe {
             set_error(b"x");
