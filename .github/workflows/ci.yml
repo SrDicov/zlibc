@@ -35,14 +35,21 @@ jobs:
         run: cargo build --verbose --target x86_64-unknown-linux-musl
 
       - name: Test (non-thread, parallel)
-        run: 'timeout 120 cargo test --verbose -- --skip thread:: --skip errno::tests::errno_is_per_thread --skip validation::'
+        run: 'timeout 120 cargo test --verbose -- --skip thread:: --skip errno::tests::errno_is_per_thread --skip validation:: --skip ldso::linkmap::'
       # Thread tests touch per-thread CPU state (FS) and process-global
       # signal dispositions/registry: serial by design, like musl's own
       # tests. Parallel cargo threads would interleave that global state.
       # The errno test clones a real thread, so it rides along here.
       # So does the D5 validation test (threads + malloc + stdio).
+      # Thread tests touch per-thread CPU state (FS) and process-global
+      # signal dispositions/registry: serial by design, like musl's own
+      # tests. Parallel cargo threads would interleave that global state.
+      # The errno test clones a real thread, so it rides along here.
+      # So does the D5 validation test (threads + malloc + stdio), and
+      # the link-map tests, which own the loader's namespace globals
+      # (head/tail/syms_tail) exactly like the thread registry owns its.
       - name: Test thread (serial)
-        run: 'timeout 120 cargo test --verbose -- thread:: errno::tests::errno_is_per_thread validation:: --test-threads=1'
+        run: 'timeout 120 cargo test --verbose -- thread:: errno::tests::errno_is_per_thread validation:: ldso::linkmap:: --test-threads=1'
       # Everything above is -O0 codegen. Release is where LLVM first sees
       # the byte-loops and the inline asm: run the whole suite optimized,
       # serially, so optimization regressions surface here and not at the

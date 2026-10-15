@@ -119,7 +119,7 @@ fn r_sym(info: usize) -> u32 {
 /// # Safety
 ///
 /// Both pointers must address valid NUL-terminated strings.
-unsafe fn streq(a: *const c_char, b: *const c_char) -> bool {
+pub(crate) unsafe fn streq(a: *const c_char, b: *const c_char) -> bool {
     unsafe {
         let mut i = 0usize;
         loop {
@@ -141,7 +141,7 @@ unsafe fn streq(a: *const c_char, b: *const c_char) -> bool {
 /// # Safety
 ///
 /// `s` must address a valid NUL-terminated string.
-unsafe fn c_strlen(s: *const c_char) -> usize {
+pub(crate) unsafe fn c_strlen(s: *const c_char) -> usize {
     unsafe {
         let mut n = 0usize;
         while *(s as *const u8).add(n) != 0 {
