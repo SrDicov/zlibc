@@ -278,6 +278,10 @@ mod tests {
     }
 
     /// Corrupt table sizes fail loud in debug (musl trusts the linker).
+    /// Debug-only by construction: the guard is a `debug_assert!`, gone in
+    /// release — so this test must not run there or it would "pass" the
+    /// wrong way (no panic, exit 0 is a failure, not a verdict).
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic]
     fn reloc_table_size_must_be_stride_multiple() {

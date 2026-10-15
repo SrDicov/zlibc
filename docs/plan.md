@@ -384,9 +384,54 @@ use-after-unmap nondeterminista.
   of the mem trio, musl ordering). CLOSED: five binaries run on zlibc
   only, 59 lib tests green.
 
+## Release codegen gate (v0.12)
+
+CI now also builds `-O2` (musl target) and runs the whole suite under
+`cargo test --release`. It earns its keep immediately: three failures
+that `-O0` cannot see.
+
+- **Identity of a one-instruction function is not a stable value.** A
+  test comparing the `TLSDESC` slot against `tlsdesc_static as usize`
+  failed only at `-O2`: LLVM gave each call site its own copy of that
+  `ud2` function, so production and test compared *two addresses*
+  (slot was consistently `fatal - 8`). Fixed with a single
+  `#[inline(never)]` accessor used by both — the contract is "the slot
+  holds the resolver", not "equals this cast expression".
+- **Our `malloc` symbol carries the exact name LLVM recognizes as a
+  `LibFunc`.** Caller-side `-O2` therefore applies its
+  allocation-size analysis: a call whose size may exceed `isize::MAX`
+  becomes `undef`, and `undef.is_null()` may be either — so
+  `edge_contracts_match_musl` failed at `-O2` and passed at `-O0`, and
+  adding a *second* use of the pointer (an `eprintln!`, or the assert
+  message) flipped the verdict. Disassembly confirmed the emitted
+  `malloc` is a correct 4-instruction wrapper around `aligned_body`:
+  nothing in zlibc was wrong. Two fixes, both in tests:
+  `black_box` on the argument (keeps the call real) *and* on the result
+  (stops LLVM folding the null test). GCC folds the same call
+  (`-Walloc-size-larger-than`) and glibc still answers NULL, so the
+  runtime contract is unchanged. The engine-level test
+  (`engine_rejects_oversize_directly`) is immune — `aligned_body` is
+  not a LibFunc name — so the oversize contract stays genuinely
+  verified. Lesson: a symbol we must export under a compiler-known name
+  is an ABI surface that changes how *callers* compile.
+- **A death test that can pass by accident.** `free(p); free(p)` did not
+  trip detection at `-O2`; adding a reclaim round-trip
+  (`free(p); q = malloc(); assert_eq!(q, p); free(q); free(p)`) both
+  proves the first free published the block and trips the check. Same
+  lesson as the `#[no_mangle]` gate: a test that can pass when the code
+  under test is absent is worse than no test.
+- `#[cfg(debug_assertions)]` on the two `should_panic` guard tests —
+  in release there is no `debug_assert!`, so they would report a false
+  failure.
+- `mem*` self-call gate on the emitted release object: a byte-loop
+  turned into `call memcpy` is an infinite recursion, not a compile
+  error. The gate asserts the **symbol is present** first, because
+  "zero calls" otherwise also means "renamed away" — a gate that can
+  never fail is worse than no gate.
+
 ## "100% done" criteria
 
 - All public musl x86_64 symbols present with correct signature/ABI.
 - Static + dynamic hello world and a pthreads binary run on zlibc.
 - Probe asserts cover the whole musl `alltypes.h`.
-- CI green on `main`.
+- CI green on `main` (debug **and** release codegen).

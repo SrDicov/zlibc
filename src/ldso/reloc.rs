@@ -213,6 +213,18 @@ extern "C" fn tlsdesc_static() -> isize {
     }
 }
 
+/// Address of [`tlsdesc_static`], as the `TLSDESC` slot must store it.
+///
+/// One accessor, so production and tests cannot disagree: at `-O2` LLVM
+/// gave the test module its own copy of this one-`ud2` function, and the
+/// identity assert then compared two distinct addresses (release-only
+/// failure). The contract is "the slot holds the static-TLS resolver",
+/// not "equals this particular cast expression".
+#[inline(never)]
+fn tlsdesc_static_ptr() -> usize {
+    tlsdesc_static as *const () as usize
+}
+
 // ---- Symbol lookup (musl ldso/dynlink.c:265-351) ----------------------------
 
 /// musl `sysv_lookup` (`dynlink.c:265-277`), reimplemented.
@@ -586,7 +598,7 @@ pub unsafe fn do_relocs(
                         // no allocator until Wave 4.
                         fatal((*dso).name, name, b"dynamic TLSDESC needs allocator");
                     }
-                    let desc: usize = tlsdesc_static as *const () as usize;
+                    let desc: usize = tlsdesc_static_ptr();
                     *addr.add(0) = desc;
                     *addr.add(1) = tls_val.wrapping_sub((*def_dso).tls.offset).wrapping_add(a);
                 }
@@ -852,7 +864,7 @@ mod tests {
                 false,
             )
         };
-        let want_fn: usize = tlsdesc_static as *const () as usize;
+        let want_fn: usize = tlsdesc_static_ptr();
         assert_eq!(unsafe { *at(base, 0x08) }, want_fn);
         assert_eq!(
             unsafe { *at(base, 0x10) },
@@ -1082,7 +1094,10 @@ mod tests {
     }
 
     /// Corrupt table sizes fail loud in debug (musl trusts the linker;
-    /// release would wrap `left` and walk OOB instead).
+    /// release would wrap `left` and walk OOB instead). Debug-only: the
+    /// guard is a `debug_assert!`, so in release there is nothing to panic
+    /// and the test would report a false failure.
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic]
     fn rel_size_must_be_stride_multiple() {

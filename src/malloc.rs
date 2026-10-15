@@ -348,6 +348,23 @@ fn set_err(e: c_int) {
     }
 }
 
+// Oversize tests: both the size and the result must be opaque.
+//
+// Our entry points carry the exact LibFunc names LLVM recognizes
+// (`malloc`, `calloc`, `realloc`, `memalign`), so caller-side `-O2`
+// applies the allocation-size analysis: a call whose size may exceed
+// `isize::MAX` yields `undef`, and `undef.is_null()` may then be either.
+// That is what made `edge_contracts_match_musl` fail at `-O2` while
+// passing at `-O0` — and why adding a second use of the pointer (an
+// `eprintln!`, or the assert message) changed the verdict. The emitted
+// `malloc` is a correct 4-instruction wrapper around `aligned_body`
+// (verified by disassembly); nothing in zlibc is wrong here.
+//
+// `black_box` on the argument keeps the call real, `black_box` on the
+// result stops LLVM from folding the null test itself. GCC folds the
+// call the same way (`-Walloc-size-larger-than`) and glibc still
+// answers NULL, so the runtime contract is unchanged.
+
 /// Shared engine for every entry point (lock inside): `size` payload
 /// bytes at `alignment` (power of two, ≥ 16), one arena refill on miss.
 unsafe fn aligned_body(alignment: usize, size: usize) -> *mut c_void {
@@ -559,6 +576,7 @@ pub unsafe extern "C" fn memalign(alignment: usize, size: usize) -> *mut c_void 
 #[cfg(test)]
 mod tests {
     use super::{aligned_alloc, calloc, free, malloc, memalign, posix_memalign, realloc, EINVAL};
+    use core::hint::black_box;
     use core::ptr::null_mut;
 
     unsafe fn sum(p: *mut u8, n: usize) -> usize {
@@ -592,6 +610,20 @@ mod tests {
     }
 
     #[test]
+    fn engine_rejects_oversize_directly() {
+        // The engine is not a LibFunc name, so it is immune to the
+        // allocation-size folding described above: this is where the
+        // oversize contract is genuinely verified, entry points or not.
+        unsafe {
+            assert!(black_box(super::aligned_body(16, black_box(usize::MAX))).is_null());
+            assert!(black_box(super::aligned_body(16, black_box(usize::MAX / 2 + 1))).is_null());
+            let r = super::aligned_body(16, black_box(64));
+            assert!(!r.is_null());
+            free(r);
+        }
+    }
+
+    #[test]
     fn edge_contracts_match_musl() {
         unsafe {
             // malloc(0) is a live smallest object, never NULL.
@@ -601,11 +633,12 @@ mod tests {
             free(z);
             // free(NULL) is a no-op.
             free(null_mut());
-            // Oversize fails clean, never panics.
-            assert!(malloc(usize::MAX).is_null());
-            assert!(malloc(usize::MAX / 2 + 1).is_null());
-            assert!(calloc(usize::MAX, 2).is_null());
-            assert!(realloc(null_mut(), usize::MAX).is_null());
+            // Oversize fails clean, never panics. Both sides black_boxed: see
+            // the note above `aligned_body`.
+            assert!(black_box(malloc(black_box(usize::MAX))).is_null());
+            assert!(black_box(malloc(black_box(usize::MAX / 2 + 1))).is_null());
+            assert!(black_box(calloc(black_box(usize::MAX), black_box(2))).is_null());
+            assert!(black_box(realloc(null_mut(), black_box(usize::MAX))).is_null());
         }
     }
 
@@ -694,6 +727,13 @@ mod tests {
                 let p = malloc(64);
                 assert!(!p.is_null());
                 free(p);
+                // Reclaim proves the first free really published the block
+                // (a second malloc hands the same address back), so the
+                // free below is a genuine double free rather than a
+                // detection test that would pass by never seeing it.
+                let q = malloc(64);
+                assert_eq!(q, p, "free did not return the block to the list");
+                free(q);
                 free(p);
             }
             unreachable!("survived double free");
@@ -704,6 +744,7 @@ mod tests {
             .arg("--exact")
             .arg("malloc::tests::double_free_aborts")
             .arg("--test-threads=1")
+            .arg("--nocapture")
             .status()
             .unwrap();
         assert!(!st.success());
@@ -725,6 +766,7 @@ mod tests {
             .arg("--exact")
             .arg("malloc::tests::foreign_free_aborts")
             .arg("--test-threads=1")
+            .arg("--nocapture")
             .status()
             .unwrap();
         assert!(!st.success());
@@ -734,7 +776,7 @@ mod tests {
     #[test]
     fn memalign_huge_alignment_fails_clean() {
         unsafe {
-            assert!(memalign(usize::MAX, 64).is_null());
+            assert!(black_box(memalign(black_box(usize::MAX), 64)).is_null());
             let a = aligned_alloc(64, 64);
             assert!(!a.is_null());
             free(a);
