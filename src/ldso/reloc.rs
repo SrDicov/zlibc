@@ -945,10 +945,7 @@ mod tests {
                 3,
                 false,
             );
-            assert_eq!(
-                *at(base, 0x08),
-                __tlsdesc_dynamic as *const () as usize
-            );
+            assert_eq!(*at(base, 0x08), __tlsdesc_dynamic as *const () as usize);
             let idx = *at(base, 0x10) as *mut TdIndexRecord;
             assert!(!idx.is_null());
             // args[0] is the module id, args[1] the DTPOFF: symbol value
