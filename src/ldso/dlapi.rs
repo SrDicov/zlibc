@@ -21,7 +21,7 @@
 
 use core::ffi::{c_char, c_int, c_void};
 use core::ptr::null_mut;
-use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 
 use super::dso::Dso;
 use super::linkmap;
@@ -46,12 +46,16 @@ pub const RTLD_NEXT: *mut c_void = usize::MAX as *mut c_void;
 pub const RTLD_DEFAULT: *mut c_void = null_mut();
 
 /// Per-thread error buffer (musl keeps `dlerror_flag` and `dlerror_buf`
-/// in `struct pthread`, `pthread_impl.h:41,59`). Ours is one shared pair
-/// of atomics: the slot lives in the TCB we do not own yet, and a
-/// process-global buffer is the conservative reading — it can report a
-/// stale message to the wrong thread, never a wrong pointer.
+/// in `struct pthread`, `pthread_impl.h:41,59`, keyed by
+/// `__pthread_self()` in `dlerror.c:15,59`). Ours is one shared triple
+/// of atomics plus an owner tag: the slot lives in the TCB we do not
+/// own yet, so the FS base stands in for `pthread_self()` — unique per
+/// thread on Linux whatever runtime owns the TCB, and never
+/// dereferenced, only compared. A thread that did not set the error sees
+/// NULL and leaves the flag set, exactly like musl.
 static ERR_FLAG: AtomicBool = AtomicBool::new(false);
 static ERR_BUF: AtomicPtr<c_char> = AtomicPtr::new(null_mut());
+static ERR_OWNER: AtomicUsize = AtomicUsize::new(0);
 
 /// Sentinel musl parks when the allocation fails
 /// (`dlerror.c:65-70`), reported as a fixed message by `dlerror`.
@@ -60,15 +64,35 @@ const OOM_MSG: &[u8] = b"Dynamic linker failed to allocate memory for error mess
 /// `usize::MAX` as a sentinel `*mut c_char`: musl uses `(void *)-1`.
 const ERR_OOM: usize = usize::MAX;
 
+/// FS base of the calling thread: the owner identity for [`ERR_OWNER`].
+/// Never dereferenced, only compared, so no magic check is needed — the
+/// value is unique per thread even for a foreign runtime's TCB.
+fn self_tp() -> usize {
+    let mut base: usize = 0;
+    let r = unsafe {
+        crate::syscall::syscall2(
+            crate::thread::SYS_ARCH_PRCTL,
+            crate::thread::ARCH_GET_FS,
+            core::ptr::addr_of_mut!(base) as usize,
+        )
+    };
+    if r == 0 { base } else { 0 }
+}
+
 /// musl `dlerror` (`src/ldso/dlerror.c:13-23`): return the pending
-/// message once and clear the flag. Does **not** free the buffer —
-/// it is reused by the next `__dl_vseterr`.
+/// message once and clear the flag — but only to the thread that set
+/// it. A foreign thread sees NULL and the flag stays set. Does **not**
+/// free the buffer — it is reused by the next `__dl_vseterr`.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
 pub extern "C" fn dlerror() -> *mut c_char {
-    if !ERR_FLAG.swap(false, Ordering::AcqRel) {
+    if !ERR_FLAG.load(Ordering::Acquire) {
         return null_mut();
     }
+    if ERR_OWNER.load(Ordering::Acquire) != self_tp() {
+        return null_mut();
+    }
+    ERR_FLAG.store(false, Ordering::Release);
     let buf = ERR_BUF.load(Ordering::Acquire);
     if buf as usize == ERR_OOM {
         return OOM_MSG.as_ptr() as *mut c_char;
@@ -104,6 +128,10 @@ pub unsafe fn set_error(msg: &[u8]) {
         crate::mem::memcpy(buf as *mut c_void, msg.as_ptr() as *const c_void, msg.len());
         *buf.add(msg.len()) = 0;
         ERR_BUF.store(buf as *mut c_char, Ordering::Release);
+        // Owner before flag: a concurrent `dlerror` that sees the flag
+        // must also see the owner. Last writer wins outside the loader
+        // lock, same as the global `errno` fallback.
+        ERR_OWNER.store(self_tp(), Ordering::Release);
         ERR_FLAG.store(true, Ordering::Release);
     }
 }
@@ -340,13 +368,29 @@ mod tests {
         }
     }
 
+    /// The error belongs to the thread that set it (musl `dlerror.c:15`:
+    /// `self = __pthread_self()`). A foreign owner sees NULL and must
+    /// not consume it; restoring ownership makes it visible again.
+    #[test]
+    fn dlerror_is_invisible_to_other_threads() {
+        let _guard = lock();
+        drain();
+        unsafe {
+            set_error(b"mine");
+            super::ERR_OWNER.store(0x1234_5678, Ordering::SeqCst);
+            assert!(dlerror().is_null(), "foreign thread sees NULL");
+            super::ERR_OWNER.store(super::self_tp(), Ordering::SeqCst);
+            assert!(!dlerror().is_null(), "nothing was lost");
+            assert!(dlerror().is_null(), "consumed exactly once");
+        }
+    }
+
     /// A short message still gets `sizeof(void*)` bytes (musl
     /// `dlerror.c:62-63`): the buffer doubles as a link word when parked
     /// on the free list, so a 5-byte message must not become a 6-byte
     /// allocation.
     #[test]
-    fn dlerror_buffer_has_the_pointer_floor() {
-        let _guard = lock();
+    fn dlerror_buffer_has_the_pointer_floor() {        let _guard = lock();
         drain();
         unsafe {
             set_error(b"x");
