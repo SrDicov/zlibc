@@ -348,17 +348,17 @@ fn set_err(e: c_int) {
     }
 }
 
-// Why every allocator entry point below is `#[inline(never)]`.
+// Oversize sizes in tests must be opaque to the optimizer.
 //
-// musl gets this for free: `malloc`, `calloc`, `realloc`, `free` and
-// `memalign` are separate translation units, so a caller's `-O2` never
-// rewrites their bodies. Rust has one CGU per module, and at `-O2`
-// LLVM inlined `malloc` into the caller — where it folded the oversize
-// gate on a constant `SIZE_MAX` and returned a pointer anyway (release
-// CI caught exactly that: `malloc(usize::MAX)` non-NULL, and null the
-// moment an unrelated statement followed it). The allocator entry
-// points are a public ABI boundary: keep them out of callers' reach,
-// same shape as musl.
+// `malloc(SIZE_MAX)` with a *constant* argument is not a call the
+// compiler has to honour: the size exceeds the largest justified object
+// size, so LLVM folds the call away before the body runs and the result
+// is `undef` — and `undef.is_null()` may be either. That is why
+// `edge_contracts_match_musl` failed only at `-O2`, and why adding any
+// statement that let the pointer escape (an `eprintln!`) made it pass:
+// the fold stopped and the real gate returned NULL. Not a zlibc bug, a
+// malformed assertion. GCC folds it the same way (hence
+// `-Walloc-size-larger-than`), and glibc answers NULL too.
 
 /// Shared engine for every entry point (lock inside): `size` payload
 /// bytes at `alignment` (power of two, ≥ 16), one arena refill on miss.
@@ -398,7 +398,6 @@ unsafe fn aligned_body(alignment: usize, size: usize) -> *mut c_void {
 /// [`free`] runs on it. Never panics; safe to call from any thread.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
-#[inline(never)]
 pub unsafe extern "C" fn malloc(n: usize) -> *mut c_void {
     unsafe { aligned_body(16, n) }
 }
@@ -412,7 +411,6 @@ pub unsafe extern "C" fn malloc(n: usize) -> *mut c_void {
 /// foreign pointers abort the process (musl `mallocng` fails the same
 /// way); the heap stays consistent for everyone else.
 #[no_mangle]
-#[inline(never)]
 pub unsafe extern "C" fn free(p: *mut c_void) {
     if p.is_null() {
         return;
@@ -431,7 +429,6 @@ pub unsafe extern "C" fn free(p: *mut c_void) {
 /// Same validity contract as [`malloc`].
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
-#[inline(never)]
 pub unsafe extern "C" fn calloc(m: usize, n: usize) -> *mut c_void {
     unsafe {
         if m != 0 && n > usize::MAX / m {
@@ -455,7 +452,6 @@ pub unsafe extern "C" fn calloc(m: usize, n: usize) -> *mut c_void {
 /// result differs from it.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
-#[inline(never)]
 pub unsafe extern "C" fn realloc(p: *mut c_void, n: usize) -> *mut c_void {
     unsafe {
         if p.is_null() {
@@ -501,7 +497,6 @@ pub unsafe extern "C" fn realloc(p: *mut c_void, n: usize) -> *mut c_void {
 /// Same validity contract as [`malloc`], plus `p % alignment == 0`.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
-#[inline(never)]
 pub unsafe extern "C" fn aligned_alloc(alignment: usize, size: usize) -> *mut c_void {
     unsafe {
         if alignment == 0 || alignment & (alignment - 1) != 0 || !size.is_multiple_of(alignment) {
@@ -520,7 +515,6 @@ pub unsafe extern "C" fn aligned_alloc(alignment: usize, size: usize) -> *mut c_
 /// `memptr` must be writable; on success it holds a live aligned object.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
-#[inline(never)]
 pub unsafe extern "C" fn posix_memalign(
     memptr: *mut *mut c_void,
     alignment: usize,
@@ -552,7 +546,6 @@ pub unsafe extern "C" fn posix_memalign(
 /// Same validity contract as [`aligned_alloc`].
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
-#[inline(never)]
 pub unsafe extern "C" fn memalign(alignment: usize, size: usize) -> *mut c_void {
     unsafe {
         // Bit-trick pow2 ceiling (no version-sensitive helpers). A wrapped
@@ -578,6 +571,7 @@ pub unsafe extern "C" fn memalign(alignment: usize, size: usize) -> *mut c_void 
 #[cfg(test)]
 mod tests {
     use super::{aligned_alloc, calloc, free, malloc, memalign, posix_memalign, realloc, EINVAL};
+    use core::hint::black_box;
     use core::ptr::null_mut;
 
     unsafe fn sum(p: *mut u8, n: usize) -> usize {
@@ -620,14 +614,16 @@ mod tests {
             free(z);
             // free(NULL) is a no-op.
             free(null_mut());
-            // Oversize fails clean, never panics.
-            let o = malloc(usize::MAX);
+            // Oversize fails clean, never panics. `black_box` keeps the argument
+            // opaque so the call is real (see the note above
+            // `aligned_body`), not folded to `undef`.
+            let o = malloc(black_box(usize::MAX));
             assert!(o.is_null());
-            let o2 = malloc(usize::MAX);
+            let o2 = malloc(black_box(usize::MAX / 2 + 1));
             assert!(o2.is_null());
-            let c = calloc(usize::MAX, 2);
+            let c = calloc(black_box(usize::MAX), black_box(2));
             assert!(c.is_null());
-            let r = realloc(null_mut(), usize::MAX);
+            let r = realloc(null_mut(), black_box(usize::MAX));
             assert!(r.is_null());
         }
     }
@@ -766,7 +762,7 @@ mod tests {
     #[test]
     fn memalign_huge_alignment_fails_clean() {
         unsafe {
-            let m = memalign(usize::MAX, 64);
+            let m = memalign(black_box(usize::MAX), 64);
             assert!(m.is_null());
             let a = aligned_alloc(64, 64);
             assert!(!a.is_null());
