@@ -1,8 +1,12 @@
 # musl x86_64 exported ABI surface (dynamic symbol table).
 # Source: musl git b1efda5b (VERSION 1.2.6), configured x86_64, linked with
 # x86_64-linux-musl-gcc 11.2.1; extracted with 'nm -D --defined-only lib/libc.so'.
-# 1640 entries: the static archive defines 1930 globals, 295 of which are
-# libc_hidden and deliberately not exported.
+# 1650 entries: the static archive defines 1930 globals, of which ~280 are
+# libc_hidden and deliberately not exported. Type letters follow nm: T/W =
+# strong/weak functions, D/B/R = strong data, V = weak data objects
+# (environ, timezone, program_invocation_*, ...). The V class was missing
+# from the first revision of this file (1640), whose nm filter only kept
+# [TWDBR]; weak data needs V.
 _Exit
 _Fork
 _IO_feof_unlocked
@@ -11,6 +15,7 @@ _IO_getc
 _IO_getc_unlocked
 _IO_putc
 _IO_putc_unlocked
+___environ
 __assert_fail
 __ctype_b_loc
 __ctype_get_mb_cur_max
@@ -148,6 +153,7 @@ __xstat
 _dl_debug_addr
 _dl_debug_state
 _dlstart
+_environ
 _exit
 _fini
 _flushlbf
@@ -350,6 +356,7 @@ ctime
 ctime_r
 cuserid
 daemon
+daylight
 dcgettext
 dcngettext
 delete_module
@@ -391,6 +398,7 @@ endspent
 endusershell
 endutent
 endutxent
+environ
 epoll_create
 epoll_create1
 epoll_ctl
@@ -979,6 +987,7 @@ optarg
 opterr
 optind
 optopt
+optreset
 pathconf
 pause
 pclose
@@ -1034,6 +1043,8 @@ printf
 prlimit
 process_vm_readv
 process_vm_writev
+program_invocation_name
+program_invocation_short_name
 pselect
 psiginfo
 psignal
@@ -1333,6 +1344,7 @@ sigismember
 siglongjmp
 signal
 signalfd
+signgam
 significand
 significandf
 sigorset
@@ -1495,6 +1507,7 @@ timerfd_gettime
 timerfd_settime
 times
 timespec_get
+timezone
 tmpfile
 tmpnam
 toascii
@@ -1520,6 +1533,7 @@ tss_set
 ttyname
 ttyname_r
 twalk
+tzname
 tzset
 ualarm
 ulckpwdf

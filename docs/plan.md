@@ -422,15 +422,23 @@ use-after-unmap nondeterminista.
   as far as the two fields the dedup key reads — offsets 0 and 8, named
   in the doc rather than guessed.
   Next: the 6E musl-gcc gate. Scope, per review: a hello proves the
-  loader boots, not that it is compatible. The gate needs four
-  binaries minimum: (a) one with `DT_NEEDED` on our own `.so`, (b) one
+  loader boots, not that it is compatible. Five binaries minimum:
+  (a) one with `DT_NEEDED` on our own `.so`, (b) one
   using `dlopen` at runtime, (c) one with `__thread` variables (static
-  TLS), (d) one using pthreads, which depends on the TCB layout. And a
+  TLS), (d) one using pthreads, which depends on the TCB layout, plus
+  (e) the COPY binary from review: `extern FILE *stdout; extern int
+  optind;` linked against our own `.so` exporting `optind`, exercising
+  COPY in two sizes (8-byte pointer, 4-byte int) with the symbol's size,
+  not its container's. None of (a)–(d) covers `R_X86_64_COPY`, and
+  busybox/python/getopt binaries all need it. And a
   known gap stays documented until it is closed: no search paths yet
   (`LD_LIBRARY_PATH`, `DT_RPATH`/`DT_RUNPATH`,
-  `/etc/ld-musl-*.path`) — Alpine packages expect `LD_LIBRARY_PATH` to
-  work, so a gate hello that avoids it proves boot, and the second
-  binary that uses it will fail in ways that look like zlibc bugs but
+  `/etc/ld-musl-*.path`) — one group, not just the first: `DT_RPATH`
+  needs no environment variable to trigger, so a binary with
+  `-Wl,-rpath,'$ORIGIN/lib'` fails to load with the user having touched
+  nothing. Alpine packages expect `LD_LIBRARY_PATH` to work, so a gate
+  hello that avoids all three proves boot, and the second binary that
+  uses any of them will fail in ways that look like zlibc bugs but
   are absent features.
 - **Audit batch (v0.11, all green, 73 tests):** three parallel audits,
   every load-bearing finding fixed + tested — pre-clone registry link

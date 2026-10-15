@@ -67,6 +67,12 @@ const ERR_OOM: usize = usize::MAX;
 /// FS base of the calling thread: the owner identity for [`ERR_OWNER`].
 /// Never dereferenced, only compared, so no magic check is needed — the
 /// value is unique per thread even for a foreign runtime's TCB.
+///
+/// Known property, not fixed: if a thread dies and its FS base is reused
+/// by a new thread, the new thread inherits ownership of a message it did
+/// not set. musl cannot do this (the storage dies with the TCB); here the
+/// shared slot persists. Stale message, never an invalid pointer — fixing
+/// it needs our own TCB, which is where this is going anyway.
 fn self_tp() -> usize {
     let mut base: usize = 0;
     let r = unsafe {
