@@ -66,16 +66,14 @@ const ERR_OOM: usize = usize::MAX;
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
 pub extern "C" fn dlerror() -> *mut c_char {
-    unsafe {
-        if !ERR_FLAG.swap(false, Ordering::AcqRel) {
-            return null_mut();
-        }
-        let buf = ERR_BUF.load(Ordering::Acquire);
-        if buf as usize == ERR_OOM {
-            return OOM_MSG.as_ptr() as *mut c_char;
-        }
-        buf
+    if !ERR_FLAG.swap(false, Ordering::AcqRel) {
+        return null_mut();
     }
+    let buf = ERR_BUF.load(Ordering::Acquire);
+    if buf as usize == ERR_OOM {
+        return OOM_MSG.as_ptr() as *mut c_char;
+    }
+    buf
 }
 
 /// musl `__dl_vseterr` (`dlerror.c:45-73`), message-only: the loader
@@ -84,6 +82,11 @@ pub extern "C" fn dlerror() -> *mut c_char {
 /// musl sizes the buffer with `max(vsnprintf_result, sizeof(void*))`
 /// because the buffer doubles as a `void *` link when parked on the
 /// free list; the minimum matters for the same reason.
+///
+/// # Safety
+///
+/// Call only from loader failure paths; the message is copied, so the
+/// caller's buffer need not outlive the call.
 #[cfg(target_arch = "x86_64")]
 pub unsafe fn set_error(msg: &[u8]) {
     unsafe {
@@ -116,7 +119,6 @@ pub unsafe fn set_error(msg: &[u8]) {
 #[no_mangle]
 pub unsafe extern "C" fn dlclose(handle: *mut c_void) -> c_int {
     unsafe {
-        let p = handle as *mut Dso;
         let mut q = linkmap::head();
         while !q.is_null() {
             if core::ptr::eq(q as *mut c_void, handle) {
@@ -179,10 +181,16 @@ pub unsafe fn addr2dso(addr: usize) -> *mut Dso {
 ///
 /// `need_def` is 0 here (musl passes 0), so an undefined weak symbol
 /// legitimately resolves to its address.
+///
+/// # Safety
+///
+/// `name` must be NUL-terminated and `handle` a loader handle, null, or
+/// `RTLD_NEXT`.
 #[cfg(target_arch = "x86_64")]
 pub unsafe fn do_dlsym(handle: *mut c_void, name: *const c_char, ra: usize) -> *mut c_void {
     unsafe {
         let head = linkmap::head();
+        // `use_deps` picks the loop shape in `find_sym_deps` below.
         let (start, use_deps): (*mut Dso, bool) = if handle.is_null() || handle == RTLD_DEFAULT {
             (head, false)
         } else if handle == RTLD_NEXT {
@@ -305,11 +313,9 @@ mod tests {
             set_error(b"boom");
             let first = dlerror();
             assert!(!first.is_null());
-            unsafe {
-                let mut n = 0usize;
-                while *first.add(n) != 0 {
-                    n += 1;
-                }
+            let mut n = 0usize;
+            while *first.add(n) != 0 {
+                n += 1;
             }
             assert_eq!(
                 unsafe { core::slice::from_raw_parts(first as *const u8, 6) },
