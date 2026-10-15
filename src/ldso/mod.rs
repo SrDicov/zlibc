@@ -11,6 +11,7 @@
 
 pub mod dlstart;
 pub mod dso;
+pub mod linkmap;
 pub mod reloc;
 
 use core::ffi::c_int;
