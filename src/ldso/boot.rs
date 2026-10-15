@@ -27,9 +27,8 @@ use super::dso::{decode_vec, Dso};
 use super::linkmap::{self, LoadFn};
 use super::reloc::do_relocs;
 use super::{
-    AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM, AUX_CNT, DT_JMPREL, DT_PLTREL, DT_PLTRELSZ,
-    DT_REL, DT_RELA, DT_RELASZ, DT_RELR, DT_RELRSZ, DT_RELSZ, DYN_CNT, PT_DYNAMIC, PT_INTERP,
-    PT_TLS,
+    AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM, AUX_CNT, DT_JMPREL, DT_PLTREL, DT_PLTRELSZ, DT_REL,
+    DT_RELA, DT_RELASZ, DT_RELR, DT_RELRSZ, DT_RELSZ, DYN_CNT, PT_DYNAMIC, PT_INTERP, PT_TLS,
 };
 
 /// musl `reloc_all` (`dynlink.c:1412-1440`) for one object: PLT, then
@@ -225,6 +224,7 @@ pub unsafe fn load_library(_name: *const c_char, _needed_by: *mut Dso) -> *mut D
 mod tests {
     use super::*;
     use crate::ldso::testlock::lock;
+    use crate::ldso::DT_NULL;
 
     /// Loader that refuses everything: the walk must still terminate and
     /// the namespace must still contain the program.
