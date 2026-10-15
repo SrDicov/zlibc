@@ -277,6 +277,7 @@ fn ldso_name() -> *mut c_char {
 /// Contract of [`LoadFn`].
 #[cfg(target_arch = "x86_64")]
 pub unsafe fn load_library(name: *const c_char, _needed_by: *mut Dso) -> *mut Dso {
+    unsafe {
     if *name == 0 {
         return null_mut();
     }
@@ -309,13 +310,10 @@ pub unsafe fn load_library(name: *const c_char, _needed_by: *mut Dso) -> *mut Ds
         super::dlapi::set_error(b"cannot open shared object");
         return null_mut();
     }
-    let mut stbuf = [0u8; 16];
-    if crate::__syscall!(super::SYS_FSTAT, fd, stbuf.as_mut_ptr()) < 0 {
+    let Some((st_dev, st_ino)) = stat_key(fd) else {
         super::dso::close_object(fd);
         return null_mut();
-    }
-    let st_dev = u64::from_ne_bytes(stbuf[0..8].try_into().unwrap());
-    let st_ino = u64::from_ne_bytes(stbuf[8..16].try_into().unwrap());
+    };
     let hit = linkmap::find_by_inode(st_dev, st_ino);
     if !hit.is_null() {
         super::dso::close_object(fd);
@@ -350,6 +348,27 @@ pub unsafe fn load_library(name: *const c_char, _needed_by: *mut Dso) -> *mut Ds
     (*p).shortname = last_component(name_ptr);
     linkmap::append_namespace(p);
     p
+    }
+}
+
+/// `fstat`'s `(st_dev, st_ino)`: the only two `struct stat` fields the
+/// loader's dedup key reads (`dynlink.c:1174`). They sit at offsets 0
+/// and 8 of the kernel struct (`arch/x86_64/bits/stat.h`); nothing else
+/// in the loader uses `struct stat`, so the rest is not modelled.
+///
+/// # Safety
+///
+/// `fd` must be an open descriptor.
+#[cfg(target_arch = "x86_64")]
+unsafe fn stat_key(fd: c_int) -> Option<(u64, u64)> {
+    let mut buf = [0u8; 16];
+    if crate::__syscall!(super::SYS_FSTAT, fd, buf.as_mut_ptr()) < 0 {
+        return None;
+    }
+    Some((
+        u64::from_ne_bytes(buf[0..8].try_into().unwrap()),
+        u64::from_ne_bytes(buf[8..16].try_into().unwrap()),
+    ))
 }
 
 /// True when `LDSO` already sits in the namespace list.
