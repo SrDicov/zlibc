@@ -359,23 +359,21 @@ pub unsafe fn load_library(name: *const c_char, _needed_by: *mut Dso) -> *mut Ds
 }
 
 /// `fstat`'s `(st_dev, st_ino)`: the only two `struct stat` fields the
-/// loader's dedup key reads (`dynlink.c:1174`). They sit at offsets 0
-/// and 8 of the kernel struct (`arch/x86_64/bits/stat.h`); nothing else
-/// in the loader uses `struct stat`, so the rest is not modelled.
+/// loader's dedup key reads (`dynlink.c:1174`). Read through
+/// [`crate::abi::StatKey`], whose offsets the probe asserts against the
+/// real musl headers — no hardcoded 0/8 anywhere.
 ///
 /// # Safety
 ///
 /// `fd` must be an open descriptor.
 #[cfg(target_arch = "x86_64")]
 unsafe fn stat_key(fd: c_int) -> Option<(u64, u64)> {
-    let mut buf = [0u8; 16];
+    let mut buf = [0u8; size_of::<crate::abi::StatKey>()];
     if crate::__syscall!(super::SYS_FSTAT, fd, buf.as_mut_ptr()) < 0 {
         return None;
     }
-    Some((
-        u64::from_ne_bytes(buf[0..8].try_into().unwrap()),
-        u64::from_ne_bytes(buf[8..16].try_into().unwrap()),
-    ))
+    let st = buf.as_ptr() as *const crate::abi::StatKey;
+    Some(unsafe { ((*st).st_dev, (*st).st_ino) })
 }
 
 /// True when `LDSO` already sits in the namespace list.

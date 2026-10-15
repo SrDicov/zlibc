@@ -229,3 +229,7 @@ const _: () = assert!(PROBE_OFF_DSO_LOADMAP == offset_of!(ldso::dso::Dso, loadma
 const _: () = assert!(PROBE_OFF_DSO_FUNCDESCS == offset_of!(ldso::dso::Dso, funcdescs));
 #[cfg(target_arch = "x86_64")]
 const _: () = assert!(PROBE_OFF_DSO_GOT == offset_of!(ldso::dso::Dso, got));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_STAT_DEV == offset_of!(abi::StatKey, st_dev));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_STAT_INO == offset_of!(abi::StatKey, st_ino));
