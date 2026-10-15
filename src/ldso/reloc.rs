@@ -917,56 +917,54 @@ mod tests {
     /// branch had no coverage at all.
     #[test]
     fn tlsdesc_dynamic_stores_index_and_module_id() {
-        unsafe {
-            set_static_tls_cnt(1);
-            let mut mem = [0u8; 64];
-            let base = mem.as_mut_ptr();
-            // tls_id 2 is past the static boundary of 1.
-            let mut syms = [sym(0, 0, 0, 0, 0), sym(0, 0x16, 1, 0x10, 4)];
-            let mut strs = *b"tlsv\0";
-            let mut ht = [0u32; 5];
-            let mut dso: Dso = core::mem::zeroed();
-            dso.tls.offset = 0x40;
-            dso.tls_id = 2;
-            unsafe {
-                sysv_chain(ht.as_mut_ptr(), 1);
-                wire(
-                    &mut dso as *mut Dso,
-                    base,
-                    syms.as_mut_ptr(),
-                    strs.as_mut_ptr() as *mut c_char,
-                    ht.as_mut_ptr(),
-                );
-            }
-            let mut rela = [0x08usize, info(1, REL_TLSDESC), 6];
-            unsafe {
-                do_relocs(
-                    &mut dso as *mut Dso,
-                    &mut dso as *mut Dso,
-                    rela.as_mut_ptr(),
-                    3 * size_of::<usize>(),
-                    3,
-                    false,
-                )
-            };
-            assert_eq!(
-                unsafe { *at(base, 0x08) },
-                __tlsdesc_dynamic as *const () as usize
+        set_static_tls_cnt(1);
+        let mut mem = [0u8; 64];
+        let base = mem.as_mut_ptr();
+        // tls_id 2 is past the static boundary of 1.
+        let mut syms = [sym(0, 0, 0, 0, 0), sym(0, 0x16, 1, 0x10, 4)];
+        let mut strs = *b"tlsv\0";
+        let mut ht = [0u32; 5];
+        let mut dso: Dso = core::mem::zeroed();
+        dso.tls.offset = 0x40;
+        dso.tls_id = 2;
+        {
+            sysv_chain(ht.as_mut_ptr(), 1);
+            wire(
+                &mut dso as *mut Dso,
+                base,
+                syms.as_mut_ptr(),
+                strs.as_mut_ptr() as *mut c_char,
+                ht.as_mut_ptr(),
             );
-            let idx = unsafe { *at(base, 0x10) } as *mut TdIndexRecord;
-            assert!(!idx.is_null());
-            // args[0] is the module id, args[1] the DTPOFF: symbol value 0x10
-            // minus the module offset 0x40 plus the addend 6.
-            assert_eq!(unsafe { (*idx).args[0] }, 2);
-            assert_eq!(
-                unsafe { (*idx).args[1] },
-                0x10usize.wrapping_sub(0x40).wrapping_add(6)
-            );
-            // Threaded for `dlopen` rollback.
-            assert_eq!(unsafe { dso.td_index as usize }, idx as usize);
-            assert!(unsafe { (*idx).next }.is_null());
         }
-    }
+        let mut rela = [0x08usize, info(1, REL_TLSDESC), 6];
+        {
+            do_relocs(
+                &mut dso as *mut Dso,
+                &mut dso as *mut Dso,
+                rela.as_mut_ptr(),
+                3 * size_of::<usize>(),
+                3,
+                false,
+            )
+        };
+        assert_eq!(
+            unsafe { *at(base, 0x08) },
+            __tlsdesc_dynamic as *const () as usize
+        );
+        let idx = unsafe { *at(base, 0x10) } as *mut TdIndexRecord;
+        assert!(!idx.is_null());
+        // args[0] is the module id, args[1] the DTPOFF: symbol value 0x10
+        // minus the module offset 0x40 plus the addend 6.
+        assert_eq!(unsafe { (*idx).args[0] }, 2);
+        assert_eq!(
+            unsafe { (*idx).args[1] },
+            0x10usize.wrapping_sub(0x40).wrapping_add(6)
+        );
+        // Threaded for `dlopen` rollback.
+        assert_eq!(unsafe { dso.td_index as usize }, idx as usize);
+        assert!(unsafe { (*idx).next }.is_null());
+}
 
     #[test]
     fn tlsdesc_static_stores_fn_and_offset() {
