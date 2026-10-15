@@ -417,7 +417,7 @@ mod tests {
     /// parallel by default, and two link-map tests interleaving would
     /// corrupt each other's namespace — the failure would look like a
     /// traversal bug, which is the worst possible lie.
-    static TEST_LOCK: MutexT = [0; 5];
+    static mut TEST_LOCK: MutexT = [0; 5];
 
     /// Releases the lock on drop, so a failing assertion reports instead of
     /// deadlocking every later test in the binary.
