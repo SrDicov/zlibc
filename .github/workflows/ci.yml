@@ -52,6 +52,12 @@ jobs:
 
       - name: Build (x86_64-unknown-linux-musl, release)
         run: cargo build --release --target x86_64-unknown-linux-musl
+
+      # DIAG (transient): ground truth on what -O2 emitted for malloc.
+      - name: DIASSP dump malloc
+        run: |
+          objdump -d --disassemble=malloc \
+            target/x86_64-unknown-linux-musl/release/deps/libzlibc-*.rlib | head -60
       # A byte-loop in a `#[no_mangle] memcpy` that LLVM turns into a call
       # to memcpy is an infinite recursion, not a compile error — it would
       # only ever show as a stack overflow at runtime. LoopIdiomRecognize
