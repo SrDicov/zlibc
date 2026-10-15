@@ -380,10 +380,9 @@ mod tests {
     use core::ptr::{addr_of, addr_of_mut, null_mut};
     use core::sync::atomic::{AtomicUsize, Ordering};
 
-
     use crate::ldso::dso::Dso;
-    use crate::ldso::testlock::lock;
     use crate::ldso::reloc::streq;
+    use crate::ldso::testlock::lock;
     use crate::ldso::{DT_NEEDED, DT_NULL};
 
     /// Fake loader registry: `(name, dso)` pairs; a null name marks an
