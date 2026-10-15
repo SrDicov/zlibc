@@ -1075,7 +1075,12 @@ mod tests {
             assert_eq!(dso.lazy_cnt, 0);
             let want = (4 + 2 + 3 + 1) * 3 * w;
             assert!(want >= 30 * w, "bound must cover every relocation");
-            crate::malloc::free(dso.lazy as *mut core::ffi::c_void);
+            // Hand the table back through the retry rather than freeing
+            // it here: the object is on the global deferred list, and a
+            // table freed behind the loader's back leaves that list
+            // pointing at a dead stack frame.
+            redo_lazy_relocs(&mut dso as *mut Dso);
+            assert!(dso.lazy.is_null());
         }
     }
 
