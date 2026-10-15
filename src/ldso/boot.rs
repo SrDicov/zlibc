@@ -27,9 +27,9 @@ use super::dso::Dso;
 use super::linkmap::{self, LoadFn};
 use super::reloc::do_relocs;
 use super::{
-    decode_vec, search_vec, AT_ENTRY, AT_PHNUM, AT_PHDR, AT_PHENT, AUX_CNT, DT_NULL, DYN_CNT,
-    DT_JMPREL, DT_PLTREL, DT_PLTRELSZ, DT_REL, DT_RELASZ, DT_RELA, DT_RELR, DT_RELRSZ, DT_RELSZ,
-    PT_DYNAMIC, PT_INTERP, PT_LOAD, PT_TLS,
+    decode_vec, search_vec, AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM, AUX_CNT, DT_JMPREL, DT_NULL,
+    DT_PLTREL, DT_PLTRELSZ, DT_REL, DT_RELA, DT_RELASZ, DT_RELR, DT_RELRSZ, DT_RELSZ, DYN_CNT,
+    PT_DYNAMIC, PT_INTERP, PT_TLS,
 };
 
 /// musl `reloc_all` (`dynlink.c:1412-1440`) for one object: PLT, then
@@ -54,7 +54,14 @@ pub unsafe fn reloc_all(head: *mut Dso, dso: *mut Dso, skip_relative: bool) {
         let laddr = |v: usize| -> *mut usize { (base.wrapping_add(v)) as *mut usize };
         // PLT first, with the stride the linker recorded (`dynlink.c:1420`).
         let plt_stride = 2 + usize::from(dynv[DT_PLTREL] == DT_RELA);
-        do_relocs(head, dso, laddr(dynv[DT_JMPREL]), dynv[DT_PLTRELSZ], plt_stride, skip_relative);
+        do_relocs(
+            head,
+            dso,
+            laddr(dynv[DT_JMPREL]),
+            dynv[DT_PLTRELSZ],
+            plt_stride,
+            skip_relative,
+        );
         do_relocs(head, dso, laddr(dynv[DT_REL]), dynv[DT_RELSZ], 2, skip_relative);
         do_relocs(head, dso, laddr(dynv[DT_RELA]), dynv[DT_RELASZ], 3, skip_relative);
         if dynv[DT_RELR] != 0 || dynv[DT_RELRSZ] != 0 {
@@ -152,11 +159,7 @@ pub unsafe fn app_dso_from_aux(aux: &[usize; AUX_CNT]) -> Dso {
 ///
 /// `aux` must be the running program's auxiliary vector, and this must
 /// run before any thread exists.
-pub unsafe fn dynlink_boot(
-    aux: &[usize; AUX_CNT],
-    app: *mut Dso,
-    load: LoadFn,
-) -> usize {
+pub unsafe fn dynlink_boot(aux: &[usize; AUX_CNT], app: *mut Dso, load: LoadFn) -> usize {
     unsafe {
         // Stage 1-2: the namespace starts at the main program.
         linkmap::set_namespace(app);
