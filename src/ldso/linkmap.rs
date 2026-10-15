@@ -217,12 +217,7 @@ pub unsafe fn load_direct_deps(p: *mut Dso, load: LoadFn) -> bool {
                     // and the namespace carries on (`dynlink.c:1288`).
                     ok = false;
                     // DIAG (transient): which name, and did it exist?
-                    crate::ldso::reloc::diag_missing(
-                        name,
-                        off,
-                        (*p).dynv.add(i).read(),
-                        filled,
-                    );
+                    crate::ldso::reloc::diag_missing(name, off, (*p).dynv.add(i).read(), filled);
                     i += 2;
                     continue;
                 }
