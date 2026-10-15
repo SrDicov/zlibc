@@ -350,34 +350,32 @@ pub unsafe fn find_by_inode(dev: u64, ino: u64) -> *mut Dso {
 mod tests {
     use super::*;
     use core::ptr::null_mut;
+    use core::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::ldso::dso::Dso;
     use crate::ldso::reloc::streq;
     use crate::ldso::{DT_NEEDED, DT_NULL};
 
-    /// Fake loader registry: `(name, dso)` pairs, first match wins.
-    /// `mark` doubles as the "already appended" flag so a diamond loads
-    /// its shared dependency once, exactly like musl's inode dedup.
-    static mut TABLE: [Option<(*const c_char, *mut Dso)>; 8] = [None; 8];
-    static mut CALLS: usize = 0;
+    /// Fake loader registry: `(name, dso)` pairs; a null name marks an
+    /// empty slot. `mark` doubles as the "already appended" flag, so a
+    /// diamond loads its shared dependency once exactly like musl's
+    /// inode dedup returning the existing object.
+    type Entry = (*const c_char, *mut Dso);
+    static mut TABLE: [Entry; 8] = [(core::ptr::null(), core::ptr::null_mut()); 8];
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
 
     unsafe fn fake_load(name: *const c_char, _needed_by: *mut Dso) -> *mut Dso {
         unsafe {
-            let n = addr_of_mut!(CALLS).read();
-            addr_of_mut!(CALLS).write(n + 1);
-            let mut k = 0usize;
-            while k < 8 {
-                if let Some((want, dso)) = addr_of!(TABLE).cast::<Option<(*const c_char, *mut Dso)>>().read().get(k).copied()
-                {
-                    if streq(want, name) {
-                        if (*dso).mark == 0 {
-                            (*dso).mark = 1;
-                            append_namespace(dso);
-                        }
-                        return dso;
+            CALLS.fetch_add(1, Ordering::SeqCst);
+            for k in 0..8 {
+                let (want, dso) = *addr_of!(TABLE).cast::<Entry>().add(k);
+                if !want.is_null() && streq(want, name) {
+                    if (*dso).mark == 0 {
+                        (*dso).mark = 1;
+                        append_namespace(dso);
                     }
+                    return dso;
                 }
-                k += 1;
             }
             null_mut()
         }
@@ -385,29 +383,22 @@ mod tests {
 
     fn register(name: &'static [u8], dso: *mut Dso) {
         unsafe {
-            let mut k = 0usize;
-            while k < 8
-                && addr_of!(TABLE)
-                    .cast::<Option<(*const c_char, *mut Dso)>>()
-                    .read()
-                    .get(k)
-                    .is_some()
-            {
-                k += 1;
+            for k in 0..8 {
+                let slot = addr_of_mut!(TABLE).cast::<Entry>().add(k);
+                if (*slot).0.is_null() {
+                    *slot = (name.as_ptr() as *const c_char, dso);
+                    return;
+                }
             }
-            addr_of_mut!(TABLE)
-                .cast::<Option<(*const c_char, *mut Dso)>>()
-                .write(Some((name.as_ptr() as *const c_char, dso)));
         }
     }
 
     fn unregister_all() {
+        CALLS.store(0, Ordering::SeqCst);
         unsafe {
-            let t = addr_of_mut!(TABLE);
-            let mut k = 0usize;
-            while k < 8 {
-                (*t).cast::<Option<(*const c_char, *mut Dso)>>().write(None).get(k);
-                k += 1;
+            for k in 0..8 {
+                let empty = (core::ptr::null(), core::ptr::null_mut());
+                *addr_of_mut!(TABLE).cast::<Entry>().add(k) = empty;
             }
         }
     }
@@ -521,12 +512,12 @@ mod tests {
             set_namespace(&mut app as *mut Dso);
             register(b"libB.so\0", &mut b as *mut Dso);
 
-            addr_of_mut!(CALLS).write(0);
+            CALLS.store(0, Ordering::SeqCst);
             assert!(load_deps(&mut app as *mut Dso, fake_load));
-            let first = CALLS;
+            let first = CALLS.load(Ordering::SeqCst);
             assert_eq!(first, 1, "one DT_NEEDED, one load");
             assert!(load_deps(&mut app as *mut Dso, fake_load));
-            assert_eq!(CALLS, first, "second walk must not reload");
+            assert_eq!(CALLS.load(Ordering::SeqCst), first, "second walk must not reload");
 
             reset_namespace();
             unregister_all();
