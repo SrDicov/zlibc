@@ -41,8 +41,8 @@ use super::dso::{gnu_hash, sysv_hash};
 
 use super::dso::{decode_vec, search_vec, Dso};
 use super::{
-    DF_1_NOW, DF_BIND_NOW, DT_BIND_NOW, DT_FLAGS, DT_FLAGS_1, DT_NULL, DT_PLTRELSZ, DT_RELASZ,
-    DT_RELSZ, DYN_CNT,
+    DF_1_NOW, DF_BIND_NOW, DT_BIND_NOW, DT_FLAGS, DT_FLAGS_1, DT_PLTRELSZ, DT_RELASZ, DT_RELSZ,
+    DYN_CNT,
 };
 
 use super::Elf64Sym;
@@ -784,6 +784,7 @@ pub unsafe fn do_relocs(
 mod tests {
     use super::*;
     use crate::ldso::testlock::lock;
+    use crate::ldso::DT_NULL;
 
     /// `r_info` word: musl `ELF64_R_INFO` (include/elf.h:573).
     fn info(sym: usize, ty: u32) -> usize {
