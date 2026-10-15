@@ -605,6 +605,19 @@ mod tests {
     }
 
     #[test]
+    fn engine_rejects_oversize_directly() {
+        unsafe {
+            let p = super::aligned_body(16, black_box(usize::MAX));
+            assert!(p.is_null(), "engine(SIZE_MAX) = {:p}", p);
+            let q = super::aligned_body(16, black_box(usize::MAX / 2 + 1));
+            assert!(q.is_null(), "engine(MAX/2+1) = {:p}", q);
+            let r = super::aligned_body(16, black_box(64));
+            assert!(!r.is_null(), "engine(64) = {:p}", r);
+            free(r);
+        }
+    }
+
+    #[test]
     fn edge_contracts_match_musl() {
         unsafe {
             // malloc(0) is a live smallest object, never NULL.
