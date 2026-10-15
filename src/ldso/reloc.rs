@@ -12,8 +12,6 @@
 //! musl's barriers suffice on real hardware (`docs/plan.md`, Wave 2).
 //!
 //! Divergences from musl, each marked `shortcut:` at the site:
-//! - Lookup starts at `dso`: musl threads the app `head` and starts
-//!   `COPY` at `head->syms_next`; no loader-global chain exists yet.
 //! - `REL` (stride 2) addends are re-read from the slot; musl's
 //!   save/reuse dance is ldso-self-only (`dynlink.c:402-407`).
 //! - `static_tls_cnt` (`dynlink.c:154`) lives here until the loader owns
@@ -619,8 +617,16 @@ pub unsafe fn do_relocs(
                     def_sym = s;
                 } else {
                     // Namespace head first (musl interposition): an
-                    // executable definition wins over the DSO's own.
-                    (def_dso, def_sym) = find_sym(head, name, ty == REL_PLT);
+                    // executable definition wins over the DSO's own —
+                    // except for COPY, whose source always lives in a
+                    // shared object, never in the executable itself
+                    // (musl `dynlink.c:432`).
+                    let ctx = if ty == REL_COPY && !head.is_null() {
+                        (*head).syms_next
+                    } else {
+                        head
+                    };
+                    (def_dso, def_sym) = find_sym(ctx, name, ty == REL_PLT);
                     if def_sym.is_null() {
                         (def_dso, def_sym) = get_lfs64(name);
                     }
@@ -1198,40 +1204,63 @@ mod tests {
         assert_eq!(unsafe { *at(base, 0x18) }, 0x1234_5678);
     }
 
+    /// A COPY source always lives in a shared object, never in the
+    /// executable itself (musl `dynlink.c:432`): even though `app` •
+    /// defines• `obj` here, the bytes must come from `lib`. This is the
+    /// shape every real COPY has — `extern FILE *stdout` in the program,
+    /// the definition in libc — and the 8-byte value pins that the copy
+    /// size is the symbol's, not its container's.
     #[test]
     fn copy_moves_sized_def() {
-        let mut mem = [0u8; 96];
-        let base = mem.as_mut_ptr();
+        let mut app_mem = [0u8; 96];
+        let app_base = app_mem.as_mut_ptr();
+        let mut lib_mem = [0u8; 96];
+        let lib_base = lib_mem.as_mut_ptr();
         unsafe {
-            *at(base, 0x40) = 0x1122_3344_5566_7788;
+            *at(app_base, 0x40) = 0xAAAA_AAAA_AAAA_AAAA;
+            *at(lib_base, 0x40) = 0xBBBB_BBBB_BBBB_BBBB;
         }
-        // "obj": GLOBAL OBJECT @0x40, 8 bytes.
-        let mut syms = [sym(0, 0, 0, 0, 0), sym(0, 0x11, 1, 0x40, 8)];
-        let mut strs = *b"obj\0";
-        let mut ht = [0u32; 5];
-        let mut dso: Dso = unsafe { core::mem::zeroed() };
+        // Both define "obj" as GLOBAL OBJECT @0x40, 8 bytes; only lib's
+        // may win.
+        let mut app_syms = [sym(0, 0, 0, 0, 0), sym(0, 0x11, 1, 0x40, 8)];
+        let mut lib_syms = [sym(0, 0, 0, 0, 0), sym(0, 0x11, 1, 0x40, 8)];
+        let mut app_strs = *b"obj\0";
+        let mut lib_strs = *b"obj\0";
+        let mut app_ht = [0u32; 5];
+        let mut lib_ht = [0u32; 5];
+        let mut app: Dso = unsafe { core::mem::zeroed() };
+        let mut lib: Dso = unsafe { core::mem::zeroed() };
         unsafe {
-            sysv_chain(ht.as_mut_ptr(), 1);
+            sysv_chain(app_ht.as_mut_ptr(), 1);
+            sysv_chain(lib_ht.as_mut_ptr(), 1);
             wire(
-                &mut dso as *mut Dso,
-                base,
-                syms.as_mut_ptr(),
-                strs.as_mut_ptr() as *mut c_char,
-                ht.as_mut_ptr(),
+                &mut app as *mut Dso,
+                app_base,
+                app_syms.as_mut_ptr(),
+                app_strs.as_mut_ptr() as *mut c_char,
+                app_ht.as_mut_ptr(),
             );
+            wire(
+                &mut lib as *mut Dso,
+                lib_base,
+                lib_syms.as_mut_ptr(),
+                lib_strs.as_mut_ptr() as *mut c_char,
+                lib_ht.as_mut_ptr(),
+            );
+            app.syms_next = &mut lib as *mut Dso;
         }
         let mut rela = [0x08usize, info(1, REL_COPY), 0];
         unsafe {
             do_relocs(
-                &mut dso as *mut Dso,
-                &mut dso as *mut Dso,
+                &mut app as *mut Dso,
+                &mut app as *mut Dso,
                 rela.as_mut_ptr(),
                 3 * size_of::<usize>(),
                 3,
                 false,
             )
         };
-        assert_eq!(unsafe { *at(base, 0x08) }, 0x1122_3344_5566_7788);
+        assert_eq!(unsafe { *at(app_base, 0x08) }, 0xBBBB_BBBB_BBBB_BBBB);
     }
 
     #[test]
