@@ -1075,7 +1075,6 @@ mod tests {
             let want = (4 + 2 + 3 + 1) * 3 * w;
             assert!(want >= 30 * w, "bound must cover every relocation");
             crate::malloc::free(dso.lazy as *mut core::ffi::c_void);
-            dso.lazy = core::ptr::null_mut();
         }
     }
 
