@@ -255,7 +255,9 @@ unsafe fn is_self(name: *const c_char) -> bool {
             if same {
                 return true;
             }
-            rp += seg_len + 1;
+            // `seg_len` already covers the dot, so this lands on the
+            // next segment — and on the NUL for the last one.
+            rp += seg_len;
         }
         false
     }
