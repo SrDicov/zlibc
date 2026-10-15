@@ -179,7 +179,6 @@ pub unsafe fn load_direct_deps(p: *mut Dso, load: LoadFn) -> bool {
         } else {
             let slots = crate::malloc::calloc(cnt + 1, size_of::<*mut Dso>());
             if slots.is_null() {
-                crate::ldso::reloc::diag_calloc_null(cnt + 1, size_of::<*mut Dso>(), is_head, cnt);
                 // musl prints and (at startup) keeps going into a NULL
                 // `deps`; we stop before that and report the failure.
                 (*p).deps = addr_of_mut!(NO_DEPS).cast::<*mut Dso>();
@@ -477,8 +476,8 @@ mod tests {
             let mut b_str = *b"libD.so\0\0\0\0";
             let mut empty = [0u8; 8];
             // "libB.so\0" is 8 bytes, so libC.so starts at offset 8. Offsets are
-// strtab positions: counting them by eye is how this test first read
-// 'o' instead of "libC.so".
+            // strtab positions: counting them by eye is how this test first read
+            // 'o' instead of "libC.so".
             let mut app_dyn = [DT_NEEDED, 0usize, DT_NEEDED, 8usize, DT_NULL, 0];
             let mut one_need = [DT_NEEDED, 0usize, DT_NULL, 0];
             let mut none = [DT_NULL, 0usize];
