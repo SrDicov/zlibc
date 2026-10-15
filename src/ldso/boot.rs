@@ -235,12 +235,15 @@ unsafe fn is_self(name: *const c_char) -> bool {
         let rest = name.add(3);
         let mut rp = 0usize;
         while RESERVED[rp] != 0 {
+            // musl's `next = strchr(rp,'.') + 1` makes the compared
+            // segment include its trailing dot, so `c.` is the unit and
+            // `libc` (no dot) does not match it.
             let seg_len = {
                 let mut n = rp;
                 while RESERVED[n] != b'.' && RESERVED[n] != 0 {
                     n += 1;
                 }
-                n - rp
+                n + 1 - rp
             };
             let mut same = true;
             for k in 0..seg_len {
