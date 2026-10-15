@@ -389,6 +389,14 @@ unsafe fn aligned_body(alignment: usize, size: usize) -> *mut c_void {
     }
 }
 
+/// DIAG (transient): call the exported entry point from an opaque frame,
+/// to tell "our `malloc` misbehaves at -O2" from "the compiler rewrote
+/// the call site".
+#[inline(never)]
+pub(crate) unsafe fn malloc_probe(n: usize) -> *mut c_void {
+    unsafe { malloc(n) }
+}
+
 /// Allocate `n` bytes (musl `malloc`, `src/malloc/mallocng/malloc.c`
 /// contract: 0 → smallest object, oversize → `ENOMEM` + NULL).
 ///
@@ -614,6 +622,8 @@ mod tests {
             let r = super::aligned_body(16, black_box(64));
             assert!(!r.is_null(), "engine(64) = {:p}", r);
             free(r);
+            let m = super::malloc_probe(black_box(usize::MAX));
+            assert!(m.is_null(), "probe(malloc)(SIZE_MAX) = {:p}", m);
         }
     }
 
