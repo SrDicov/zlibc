@@ -964,7 +964,7 @@ mod tests {
         // Threaded for `dlopen` rollback.
         assert_eq!(unsafe { dso.td_index as usize }, idx as usize);
         assert!(unsafe { (*idx).next }.is_null());
-}
+    }
 
     #[test]
     fn tlsdesc_static_stores_fn_and_offset() {
