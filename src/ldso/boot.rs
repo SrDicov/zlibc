@@ -62,8 +62,22 @@ pub unsafe fn reloc_all(head: *mut Dso, dso: *mut Dso, skip_relative: bool) {
             plt_stride,
             skip_relative,
         );
-        do_relocs(head, dso, laddr(dynv[DT_REL]), dynv[DT_RELSZ], 2, skip_relative);
-        do_relocs(head, dso, laddr(dynv[DT_RELA]), dynv[DT_RELASZ], 3, skip_relative);
+        do_relocs(
+            head,
+            dso,
+            laddr(dynv[DT_REL]),
+            dynv[DT_RELSZ],
+            2,
+            skip_relative,
+        );
+        do_relocs(
+            head,
+            dso,
+            laddr(dynv[DT_RELA]),
+            dynv[DT_RELASZ],
+            3,
+            skip_relative,
+        );
         if dynv[DT_RELR] != 0 || dynv[DT_RELRSZ] != 0 {
             let mut left = dynv[DT_RELRSZ];
             let mut p = laddr(dynv[DT_RELR]);
