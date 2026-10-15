@@ -27,8 +27,9 @@ use super::dso::{decode_vec, Dso};
 use super::linkmap::{self, LoadFn};
 use super::reloc::do_relocs;
 use super::{
-    AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM, AUX_CNT, DT_JMPREL, DT_PLTREL, DT_PLTRELSZ, DT_REL,
-    DT_RELA, DT_RELASZ, DT_RELR, DT_RELRSZ, DT_RELSZ, DYN_CNT, PT_DYNAMIC, PT_INTERP, PT_TLS,
+    AT_EGID, AT_ENTRY, AT_EUID, AT_GID, AT_PHDR, AT_PHENT, AT_PHNUM, AT_SECURE, AT_UID, AUX_CNT,
+    DT_JMPREL, DT_PLTREL, DT_PLTRELSZ, DT_REL, DT_RELA, DT_RELASZ, DT_RELR, DT_RELRSZ, DT_RELSZ,
+    DYN_CNT, PT_DYNAMIC, PT_INTERP, PT_TLS,
 };
 
 /// musl `reloc_all` (`dynlink.c:1412-1440`) for one object: PLT, then
@@ -164,6 +165,40 @@ pub unsafe fn app_dso_from_aux(aux: &[usize; AUX_CNT]) -> Dso {
     }
 }
 
+/// Whether the loader must distrust the environment, from the decoded
+/// aux table (musl `__dls3`, `dynlink.c:1822-1824`).
+///
+/// `aux[0]` is NOT the `AT_NULL` value: `decode_vec` sets bit `v[0]` in
+/// `a[0]` for every low key it sees (`dynlink.c:227-228`, replicated in
+/// ours), so `aux[0]` is a presence bitmap and `0x7800` tests that the
+/// kernel provided `AT_UID`..`AT_EGID` (keys 11-14) at all. Reading it
+/// as a value would conclude `secure` unconditionally — the exact
+/// misreading this function exists to prevent.
+pub(crate) fn secure_from_aux(aux: &[usize; AUX_CNT]) -> bool {
+    (aux[0] & 0x7800) != 0x7800
+        || aux[AT_UID] != aux[AT_EUID]
+        || aux[AT_GID] != aux[AT_EGID]
+        || aux[AT_SECURE] != 0
+}
+
+/// Publish `__environ` and `secure` before any dependency is loaded
+/// (musl `__dls3`, `dynlink.c:1817-1824`). `LD_LIBRARY_PATH` and the
+/// `$ORIGIN`/secure filters in the search paths read both, so doing it
+/// here — not in `__init_libc`, which runs after the loader jumps to
+/// the program — is what makes boot-time `DT_NEEDED` resolution see the
+/// real environment. Split by cfg because the globals do not exist in
+/// test builds; tests drive the loader with explicit state instead.
+#[cfg(all(not(test), target_arch = "x86_64"))]
+unsafe fn init_loader_state(envp: *mut *mut c_char, aux: &[usize; AUX_CNT]) {
+    unsafe {
+        core::ptr::addr_of_mut!(crate::start::__environ).write(envp);
+        (*core::ptr::addr_of_mut!(crate::start::__libc)).secure =
+            if secure_from_aux(aux) { 1 } else { 0 };
+    }
+}
+#[cfg(test)]
+unsafe fn init_loader_state(_envp: *mut *mut c_char, _aux: &[usize; AUX_CNT]) {}
+
 /// musl's `__dls3` tail: run every stage the loader needs, then hand back
 /// the program's entry point.
 ///
@@ -175,8 +210,15 @@ pub unsafe fn app_dso_from_aux(aux: &[usize; AUX_CNT]) -> Dso {
 ///
 /// `aux` must be the running program's auxiliary vector, and this must
 /// run before any thread exists.
-pub unsafe fn dynlink_boot(aux: &[usize; AUX_CNT], app: *mut Dso, load: LoadFn) -> usize {
+pub unsafe fn dynlink_boot(
+    envp: *mut *mut c_char,
+    aux: &[usize; AUX_CNT],
+    app: *mut Dso,
+    load: LoadFn,
+) -> usize {
     unsafe {
+        // Stage 0: environment and trust level, before anything loads.
+        init_loader_state(envp, aux);
         // Stage 1-2: the namespace starts at the main program.
         linkmap::set_namespace(app);
         // Stage 3: dependencies, breadth-first.
@@ -885,7 +927,7 @@ mod tests {
             let mut raw = [0usize; 2];
             raw[0] = DT_NULL;
             app.dynv = raw.as_mut_ptr();
-            let entry = dynlink_boot(&aux, &mut app as *mut Dso, no_deps);
+            let entry = dynlink_boot(core::ptr::null_mut(), &aux, &mut app as *mut Dso, no_deps);
             assert_eq!(entry, 0xdead_0000);
             assert_eq!(linkmap::head(), &mut app as *mut Dso);
             assert_eq!(app.relocated, 1, "reloc_all ran on the program");
@@ -944,6 +986,34 @@ mod tests {
         for no in ["libfoo.so", "libz.so", "lib", "li", "l", "", "libc"] {
             assert!(!unsafe { is_self(c_str(no).as_ptr()) }, "{no} is not us");
         }
+    }
+
+    /// `secure_from_aux` reads musl's exact condition: the bitmap in
+    /// `aux[0]` must show keys 11-14 present, the uid/gid pairs must
+    /// match, and `AT_SECURE` must be zero — otherwise the loader
+    /// distrusts the environment.
+    #[test]
+    fn secure_from_aux_matches_musl_conditions() {
+        let _guard = lock();
+        let mut aux = [0usize; AUX_CNT];
+        aux[0] = 0x7800;
+        aux[AT_UID] = 1000;
+        aux[AT_EUID] = 1000;
+        aux[AT_GID] = 1000;
+        aux[AT_EGID] = 1000;
+        aux[AT_SECURE] = 0;
+        assert!(!secure_from_aux(&aux), "normal process is not secure");
+        aux[AT_EUID] = 0;
+        assert!(secure_from_aux(&aux), "setuid trusts nothing");
+        aux[AT_EUID] = 1000;
+        aux[AT_SECURE] = 1;
+        assert!(secure_from_aux(&aux), "AT_SECURE trusts nothing");
+        aux[AT_SECURE] = 0;
+        aux[0] = 0x0800;
+        assert!(
+            secure_from_aux(&aux),
+            "missing uid/gid keys means secure, even with matching ids"
+        );
     }
 
     /// `app_dso_from_aux` must not invent a `dynv` when the program has
