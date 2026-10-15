@@ -217,7 +217,9 @@ pub static mut LDSO: Dso = unsafe { core::mem::zeroed() };
 /// This is what lets a musl-linked binary keep its `DT_NEEDED: libc.so`
 /// when the libc *is* us.
 #[cfg(target_arch = "x86_64")]
-const RESERVED: &[u8] = b"c.pthread.rt.m.dl.util.xnet.";
+/// musl's is a C string literal, so it carries the implicit NUL the
+/// loop below terminates on; a Rust byte literal does not.
+const RESERVED: &[u8] = b"c.pthread.rt.m.dl.util.xnet.\0";
 
 #[cfg(target_arch = "x86_64")]
 unsafe fn is_self(name: *const c_char) -> bool {
