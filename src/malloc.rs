@@ -391,7 +391,9 @@ unsafe fn aligned_body(alignment: usize, size: usize) -> *mut c_void {
 
 /// DIAG (transient): call the exported entry point from an opaque frame,
 /// to tell "our `malloc` misbehaves at -O2" from "the compiler rewrote
-/// the call site".
+/// the call site". `#[cfg(test)]`-free on purpose: dead code is an error
+/// in this crate, and the probe only exists for the release bisect.
+#[cfg(test)]
 #[inline(never)]
 pub(crate) unsafe fn malloc_probe(n: usize) -> *mut c_void {
     unsafe { malloc(n) }
