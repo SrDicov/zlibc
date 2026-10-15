@@ -776,18 +776,27 @@ mod tests {
             let rpath = c"/a:/b".as_ptr() as *mut c_char;
             plain.rpath_orig = rpath;
             let mut buf = [0u8; 4096];
-            assert_eq!(fixup_rpath(&mut plain as *mut Dso, buf.as_mut_ptr(), buf.len()), 0);
+            assert_eq!(
+                fixup_rpath(&mut plain as *mut Dso, buf.as_mut_ptr(), buf.len()),
+                0
+            );
             assert_eq!(plain.rpath, rpath, "shared, not copied");
 
             let mut bad: Dso = core::mem::zeroed();
             bad.rpath_orig = c"/a/$FOO/b".as_ptr() as *mut c_char;
-            assert_eq!(fixup_rpath(&mut bad as *mut Dso, buf.as_mut_ptr(), buf.len()), 0);
+            assert_eq!(
+                fixup_rpath(&mut bad as *mut Dso, buf.as_mut_ptr(), buf.len()),
+                0
+            );
             assert!(bad.rpath.is_null(), "unexpandable entry is skipped");
 
             let mut lib: Dso = core::mem::zeroed();
             lib.name = c"/x/y/libz.so".as_ptr() as *mut c_char;
             lib.rpath_orig = c"$ORIGIN/lib:${ORIGIN}/extra".as_ptr() as *mut c_char;
-            assert_eq!(fixup_rpath(&mut lib as *mut Dso, buf.as_mut_ptr(), buf.len()), 0);
+            assert_eq!(
+                fixup_rpath(&mut lib as *mut Dso, buf.as_mut_ptr(), buf.len()),
+                0
+            );
             assert!(!lib.rpath.is_null());
             let got = core::slice::from_raw_parts(lib.rpath as *const u8, 17);
             assert_eq!(got, b"/x/y/lib:/x/y/ext", "both spellings expand to the dirname");
@@ -837,7 +846,10 @@ mod tests {
             let mut buf = [0u8; 4096];
             let mut app: Dso = core::mem::zeroed();
             app.rpath_orig = c"/bin".as_ptr() as *mut c_char;
-            assert_eq!(fixup_rpath(&mut app as *mut Dso, buf.as_mut_ptr(), buf.len()), 0);
+            assert_eq!(
+                fixup_rpath(&mut app as *mut Dso, buf.as_mut_ptr(), buf.len()),
+                0
+            );
             let found = search_bare(
                 c"sh".as_ptr(),
                 &mut app as *mut Dso,
