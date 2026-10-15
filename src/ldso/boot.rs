@@ -224,7 +224,7 @@ pub unsafe fn load_library(_name: *const c_char, _needed_by: *mut Dso) -> *mut D
 mod tests {
     use super::*;
     use crate::ldso::testlock::lock;
-    use crate::ldso::DT_NULL;
+    use crate::ldso::{AT_BASE, DT_NULL};
 
     /// Loader that refuses everything: the walk must still terminate and
     /// the namespace must still contain the program.
@@ -300,7 +300,7 @@ mod tests {
             aux[AT_PHDR] = phdrs.as_mut_ptr() as usize;
             aux[AT_PHNUM] = 3;
             aux[AT_PHENT] = 64;
-            aux[super::AT_BASE] = 0;
+            aux[AT_BASE] = 0;
             let d = app_dso_from_aux(&aux);
             assert_eq!(d.phnum, 3);
             assert_eq!(d.tls.size, 32);
