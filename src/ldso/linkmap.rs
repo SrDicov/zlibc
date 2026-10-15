@@ -420,7 +420,7 @@ mod tests {
     static TEST_LOCK: MutexT = [0; 5];
 
     /// Releases the lock on drop, so a failing assertion reports instead of
-/// deadlocking every later test in the binary.
+    /// deadlocking every later test in the binary.
     struct TestGuard;
 
     impl Drop for TestGuard {
