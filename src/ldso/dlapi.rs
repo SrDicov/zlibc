@@ -374,12 +374,10 @@ mod tests {
     #[test]
     fn dlsym_on_empty_namespace_misses_cleanly() {
         let _guard = lock();
-        unsafe {
-            linkmap::reset_namespace();
-            assert!(dlsym(RTLD_DEFAULT, c"nope".as_ptr()).is_null());
-            assert!(!dlerror().is_null());
-            linkmap::reset_namespace();
-        }
+        linkmap::reset_namespace();
+        assert!(dlsym(RTLD_DEFAULT, c"nope".as_ptr()).is_null());
+        assert!(!dlerror().is_null());
+        linkmap::reset_namespace();
     }
 
     /// A handle that is not in the namespace is rejected, which is what
