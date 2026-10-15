@@ -326,7 +326,7 @@ mod tests {
             while *first.add(n) != 0 {
                 n += 1;
             }
-            let bytes = unsafe { core::slice::from_raw_parts(first as *const u8, 6) };
+            let bytes = core::slice::from_raw_parts(first as *const u8, 6);
             assert_eq!(bytes, b"boom\0");
             assert!(dlerror().is_null(), "flag cleared by the first read");
         }
@@ -387,9 +387,9 @@ mod tests {
     #[test]
     fn dlsym_rejects_unknown_handle() {
         let _guard = lock();
-        unsafe {
+        {
             linkmap::reset_namespace();
-            let mut d: Dso = core::mem::zeroed();
+            let mut d: Dso = unsafe { core::mem::zeroed() };
             linkmap::set_namespace(&mut d as *mut Dso);
             assert!(dlsym(0x1000 as *mut c_void, c"x".as_ptr()).is_null());
             let msg = dlerror();
