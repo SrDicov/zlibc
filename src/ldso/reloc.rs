@@ -953,15 +953,18 @@ mod tests {
             // args[0] is the module id, args[1] the DTPOFF: symbol value 0x10
             // minus the module offset 0x40 plus the addend 6.
             assert_eq!(unsafe { (*idx).args[0] }, 2);
-            assert_eq!(unsafe { (*idx).args[1] }, 0x10usize.wrapping_sub(0x40).wrapping_add(6));
+            assert_eq!(
+                unsafe { (*idx).args[1] },
+                0x10usize.wrapping_sub(0x40).wrapping_add(6)
+            );
             // Threaded for `dlopen` rollback.
             assert_eq!(unsafe { dso.td_index }, idx);
             assert!(unsafe { (*idx).next }.is_null());
+        }
     }
-}
 
-#[test]
-fn tlsdesc_static_stores_fn_and_offset() {
+    #[test]
+    fn tlsdesc_static_stores_fn_and_offset() {
         set_static_tls_cnt(1);
         let mut mem = [0u8; 64];
         let base = mem.as_mut_ptr();
