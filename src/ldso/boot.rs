@@ -479,8 +479,13 @@ mod tests {
     /// `libfoo.so` must not.
     #[test]
     fn reserved_names_resolve_to_the_loader_itself() {
+        // musl's check is a segment *prefix* match, not equality: it
+        // compares `name+3` against `"c."` and so also claims
+        // `libc.so.1`. Reproduced rather than corrected — a program that
+        // depends on `libc.so.1` wants us anyway.
         for yes in [
             "libc.so",
+            "libc.so.1",
             "libpthread.so",
             "librt.so",
             "libm.so",
@@ -492,7 +497,6 @@ mod tests {
         }
         for no in [
             "libfoo.so",
-            "libc.so.1",
             "libz.so",
             "lib",
             "li",
