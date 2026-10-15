@@ -421,6 +421,16 @@ use-after-unmap nondeterminista.
   a hit). `sizeof(Elf64Phdr)` is 56, and `struct stat` is only modelled
   as far as the two fields the dedup key reads — offsets 0 and 8, named
   in the doc rather than guessed.
+  Boot-order audit fix (`src/ldso/boot.rs`): `dynlink_boot` now takes
+  `envp` and publishes `__environ` + `secure` *before* `load_deps`
+  (musl `__dls3`, `dynlink.c:1817-1824`) — depending on `__init_libc`
+  would have left `LD_LIBRARY_PATH` blind and `secure` false during
+  boot-time `DT_NEEDED` resolution. `aux[0]` is a key-presence bitmap
+  (`decode_vec` sets bit `v[0]`), so `0x7800` tests keys 11-14 present;
+  misreading it as a value concludes `secure` unconditionally, and the
+  pure `secure_from_aux` exists to pin the right reading. Note:
+  `dynlink_boot` is still only exercised by tests — `_dlstart_c`
+  returns the base without chaining into it, which is 6E wiring work.
   Search-paths packet DONE (`src/ldso/boot.rs`): `LD_LIBRARY_PATH`
   unless `libc.secure`, each `needed_by` ancestor's `RPATH`/`RUNPATH`
   with `$ORIGIN` expansion, then `/lib:/usr/local/lib:/usr/lib` —
