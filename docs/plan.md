@@ -421,7 +421,17 @@ use-after-unmap nondeterminista.
   a hit). `sizeof(Elf64Phdr)` is 56, and `struct stat` is only modelled
   as far as the two fields the dedup key reads — offsets 0 and 8, named
   in the doc rather than guessed.
-  Next: the 6E musl-gcc gate.
+  Next: the 6E musl-gcc gate. Scope, per review: a hello proves the
+  loader boots, not that it is compatible. The gate needs four
+  binaries minimum: (a) one with `DT_NEEDED` on our own `.so`, (b) one
+  using `dlopen` at runtime, (c) one with `__thread` variables (static
+  TLS), (d) one using pthreads, which depends on the TCB layout. And a
+  known gap stays documented until it is closed: no search paths yet
+  (`LD_LIBRARY_PATH`, `DT_RPATH`/`DT_RUNPATH`,
+  `/etc/ld-musl-*.path`) — Alpine packages expect `LD_LIBRARY_PATH` to
+  work, so a gate hello that avoids it proves boot, and the second
+  binary that uses it will fail in ways that look like zlibc bugs but
+  are absent features.
 - **Audit batch (v0.11, all green, 73 tests):** three parallel audits,
   every load-bearing finding fixed + tested — pre-clone registry link
   (detached-child UAF), honest `raw_clone` clobbers, magic-gated canary,
