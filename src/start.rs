@@ -444,11 +444,11 @@ mod tests {
     #[test]
     fn progname_short_strips_directories() {
         let full = c"/usr/bin/foo";
-        let short = unsafe { progname_short(full.as_ptr()) };
-        assert_eq!(short, unsafe { full.as_ptr().add(9) });
+        let short = progname_short(full.as_ptr());
+        assert_eq!(short, full.as_ptr().wrapping_add(9));
         let bare = c"foo";
-        assert_eq!(unsafe { progname_short(bare.as_ptr()) }, bare.as_ptr());
+        assert_eq!(progname_short(bare.as_ptr()), bare.as_ptr());
         let empty = c"";
-        assert_eq!(unsafe { progname_short(empty.as_ptr()) }, empty.as_ptr());
+        assert_eq!(progname_short(empty.as_ptr()), empty.as_ptr());
     }
 }
