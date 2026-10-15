@@ -69,6 +69,9 @@ jobs:
       # The symbol-presence check is load-bearing: a renamed/missing symbol
       # would make "zero calls" look like a pass, i.e. a gate that can
       # never fail. Absence is an error, not a green.
+      - name: Symbol coverage vs musl
+        run: ./tools/symbol-gate.sh
+
       - name: mem* must not self-call (release codegen)
         run: |
           fail=0

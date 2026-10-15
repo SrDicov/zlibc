@@ -371,8 +371,23 @@ use-after-unmap nondeterminista.
   **AT&T** — `options(att_syntax)` is required, the Rust default is
   Intel), the `td_index` record and the dynamic `REL_TLSDESC` arm,
   which used to be a fatal path. `__tls_get_addr` returns an absolute
-  address — no `- TP`, unlike the descriptors. Next: 6D lazy PLT +
-  `libdl`, 6E musl-gcc gate.
+  address — no `- TP`, unlike the descriptors.
+  Packet 6D-1 DONE: `prepare_lazy` + `redo_lazy_relocs`. The headline
+  correction: **musl has no PLT trampoline and no `__dlresolve`** —
+  every `JUMP_SLOT` is resolved eagerly at load time. "Lazy" means only
+  that a symbol not yet in the namespace is recorded as a 3-word
+  `{r_offset, r_info, addend}` triple and retried after `dlopen`. Until
+  this packet `dso->lazy` was never assigned, so the deferral branch in
+  `do_relocs` was dead code.
+- **Measured, not estimated:** musl `libc.so` (git `b1efda5b`, gcc
+  11.2.1, x86_64) exports **1640** dynamic symbols; the static archive
+  defines 1930 globals, 295 of them `libc_hidden`. zlibc implements
+  **93 (5.7%)**. `tools/symbol-gate.sh` reports it on every CI run, and
+  `tools/musl-exports.txt` is the baseline. Also recorded: musl's
+  `libc.so` has **no `DT_SONAME`**, which matters for the 6E
+  substitution point.
+  Next: 6D-2 `libdl` (`dlopen`/`dlsym`/`dlclose`/`dlerror`), 6E
+  musl-gcc gate.
 - **Audit batch (v0.11, all green, 73 tests):** three parallel audits,
   every load-bearing finding fixed + tested — pre-clone registry link
   (detached-child UAF), honest `raw_clone` clobbers, magic-gated canary,

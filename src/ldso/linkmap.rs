@@ -326,10 +326,36 @@ pub unsafe fn find_by_shortname(name: *const c_char) -> *mut Dso {
     }
 }
 
+/// Deferred-relocation list head (musl `lazy_head`, `dynlink.c:141`),
+/// threaded through `Dso::lazy_next`.
+static LAZY_HEAD: AtomicPtr<Dso> = AtomicPtr::new(null_mut());
+
+/// Link `p` onto the deferred-relocation list (musl `dynlink.c:2101-2102`).
+///
+/// # Safety
+///
+/// `p` must be a `Dso` with a freshly allocated `lazy` table.
+pub unsafe fn push_lazy(p: *mut Dso) {
+    unsafe {
+        (*p).lazy_next = LAZY_HEAD.load(Ordering::Acquire);
+        LAZY_HEAD.store(p, Ordering::Release);
+    }
+}
+
+/// Detach and return the whole deferred-relocation list (musl
+/// `dynlink.c:584`: the list is taken off before iterating, so a retry
+/// that re-queues an entry cannot extend the loop).
+///
+/// # Safety
+///
+/// Only during loader single ownership.
+pub fn take_lazy_head() -> *mut Dso {
+    let h = LAZY_HEAD.load(Ordering::Acquire);
+    LAZY_HEAD.store(null_mut(), Ordering::Release);
+    h
+}
+
 /// Already-loaded object with this `(dev, ino)`, skipping the main
-/// program (musl's post-open dedup layer, `dynlink.c:1174-1184`). This
-/// is the layer that actually catches a diamond reached through
-/// different pathnames.
 ///
 /// # Safety
 ///
@@ -354,10 +380,9 @@ mod tests {
     use core::ptr::{addr_of, addr_of_mut, null_mut};
     use core::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::sync::{pthread_mutex_lock, pthread_mutex_unlock, MutexT};
-
     use crate::ldso::dso::Dso;
     use crate::ldso::reloc::streq;
+    use crate::ldso::testlock::lock;
     use crate::ldso::{DT_NEEDED, DT_NULL};
 
     /// Fake loader registry: `(name, dso)` pairs; a null name marks an
@@ -409,34 +434,6 @@ mod tests {
 
     fn zeroed_dso() -> Dso {
         unsafe { core::mem::zeroed() }
-    }
-
-    /// Serializes the tests below: they own the loader's global state
-    /// (`head`/`tail`/`syms_tail`, plus `TABLE`), exactly like the
-    /// thread tests own the registry. libtest runs a module's tests in
-    /// parallel by default, and two link-map tests interleaving would
-    /// corrupt each other's namespace — the failure would look like a
-    /// traversal bug, which is the worst possible lie.
-    static mut TEST_LOCK: MutexT = [0; 5];
-
-    /// Releases the lock on drop, so a failing assertion reports instead of
-    /// deadlocking every later test in the binary.
-    struct TestGuard;
-
-    impl Drop for TestGuard {
-        fn drop(&mut self) {
-            unsafe {
-                pthread_mutex_unlock(addr_of_mut!(TEST_LOCK));
-            }
-        }
-    }
-
-    /// Take the lock; the returned guard holds it until the test ends.
-    fn lock() -> TestGuard {
-        unsafe {
-            pthread_mutex_lock(addr_of_mut!(TEST_LOCK));
-        }
-        TestGuard
     }
 
     /// Namespace order as a list of the `name` fields, so a wrong BFS
