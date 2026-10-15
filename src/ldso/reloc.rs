@@ -321,9 +321,7 @@ pub unsafe fn prepare_lazy(p: *mut Dso) -> bool {
         decode_vec((*p).dynv, dynv.as_mut_ptr(), DYN_CNT);
         let mut flags1 = 0usize;
         search_vec((*p).dynv, &mut flags1, DT_FLAGS_1);
-        if dynv[DT_BIND_NOW] != 0
-            || (dynv[DT_FLAGS] & DF_BIND_NOW) != 0
-            || (flags1 & DF_1_NOW) != 0
+        if dynv[DT_BIND_NOW] != 0 || (dynv[DT_FLAGS] & DF_BIND_NOW) != 0 || (flags1 & DF_1_NOW) != 0
         {
             return true;
         }
