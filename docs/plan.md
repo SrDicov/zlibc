@@ -349,9 +349,18 @@ use-after-unmap nondeterminista.
   `AT_PHDR` scan, RELATIVE-only self-reloc for REL/RELA/RELR, musl-exact
   entry asm behind `cfg(not(test))`, 63 tests green). Lesson: write the
   *target slot* (`base + rel[0]`), never the table entry — caught by the
-  suite, fixed line-faithful to `dlstart.c`. Next: 6B link-map +
-  cross-DSO lookup, 6C dynamic TLS, 6D lazy PLT + `libdl`, 6E musl-gcc
-  gate.
+  suite, fixed line-faithful to `dlstart.c`. Packet 6B DONE:
+  `src/ldso/linkmap.rs` — namespace list (`head`/`tail` as `AtomicPtr`),
+  the `DT_NEEDED` walk, and the global symbol scope. The traversal is
+  musl's shape exactly: **no recursion, no queue** — `load_deps` walks
+  the namespace and `load_direct_deps` appends at the tail, so the
+  cursor continues into what it just added (level-order BFS, musl
+  commit `40355569`). `deps` holds *direct* deps only, `builtin_deps`
+  keeps a dependency-free boot allocation-free, both dedup layers skip
+  `head->next`. 6 tests, incl. the diamond `app→{B,C}`, `B,C→{D}`.
+  Lesson: tests over loader globals need the same serialization as
+  the thread tests, and strtab offsets must be counted, not eyeballed.
+  Next: 6C dynamic TLS, 6D lazy PLT + `libdl`, 6E musl-gcc gate.
 - **Audit batch (v0.11, all green, 73 tests):** three parallel audits,
   every load-bearing finding fixed + tested — pre-clone registry link
   (detached-child UAF), honest `raw_clone` clobbers, magic-gated canary,
