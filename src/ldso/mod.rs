@@ -32,6 +32,10 @@ pub const SYS_MUNMAP: usize = 11; // TODO: generate from arch bits/syscall.h
 pub const SYS_PREAD64: usize = 17; // TODO: generate from arch bits/syscall.h
 #[cfg(target_arch = "x86_64")]
 pub const SYS_OPENAT: usize = 257; // TODO: generate from arch bits/syscall.h
+/// `SYS_fstat` (x86_64 `bits/syscall.h:43`); the loader's inode dedup
+/// needs nothing else from `struct stat`.
+#[cfg(target_arch = "x86_64")]
+pub const SYS_FSTAT: usize = 5;
 
 // ---- open/mmap plumbing ----------------------------------------------------
 /// musl `AT_FDCWD` (musl `include/fcntl.h:60`): open relative to cwd.
