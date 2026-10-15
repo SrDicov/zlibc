@@ -36,6 +36,10 @@ pub const SYS_OPENAT: usize = 257; // TODO: generate from arch bits/syscall.h
 /// needs nothing else from `struct stat`.
 #[cfg(target_arch = "x86_64")]
 pub const SYS_FSTAT: usize = 5;
+/// `SYS_readlink` (x86_64 `bits/syscall.h:89`); `$ORIGIN` in an
+/// `RPATH`/`RUNPATH` needs it.
+#[cfg(target_arch = "x86_64")]
+pub const SYS_READLINK: usize = 89;
 
 // ---- open/mmap plumbing ----------------------------------------------------
 /// musl `AT_FDCWD` (musl `include/fcntl.h:60`): open relative to cwd.

@@ -20,7 +20,7 @@
 //!    being done (`dynlink.c:2030-2031`);
 //! 6. the entry point is returned and jumped to.
 
-use core::ffi::{c_char, c_int};
+use core::ffi::{c_char, c_int, c_void};
 use core::ptr::null_mut;
 
 use super::dso::{decode_vec, Dso};
@@ -270,9 +270,297 @@ fn ldso_name() -> *mut c_char {
     c"libc.so".as_ptr() as *mut c_char
 }
 
-/// musl `load_library` (`dynlink.c:1057-1260`), minus the search-path
-/// machinery (`LD_LIBRARY_PATH`, `DT_RPATH`, `/etc/ld-musl-*.path`): the
-/// self-name check, both dedup layers, open, `map_object`, link.
+/// musl errno values the path search distinguishes
+/// (`arch/generic/bits/errno.h`): `path_open` keeps searching on these
+/// and inhibits the whole search on anything else.
+#[cfg(target_arch = "x86_64")]
+const ENOENT: c_int = 2;
+#[cfg(target_arch = "x86_64")]
+const ENOTDIR: c_int = 20;
+#[cfg(target_arch = "x86_64")]
+const EACCES: c_int = 13;
+#[cfg(target_arch = "x86_64")]
+const ENAMETOOLONG: c_int = 36;
+
+/// System default search path, used when nothing else matched (musl
+/// `dynlink.c:1164`).
+#[cfg(target_arch = "x86_64")]
+const DEFAULT_PATHS: &[u8] = b"/lib:/usr/local/lib:/usr/lib\0";
+
+/// Whether the loader must distrust the environment (musl `libc.secure`,
+/// `dynlink.c:1821-1829`). Split by cfg because `__libc` does not exist
+/// in test builds; tests drive `search_bare` with an explicit `secure`.
+#[cfg(all(not(test), target_arch = "x86_64"))]
+fn loader_secure() -> bool {
+    unsafe { (*core::ptr::addr_of_mut!(crate::start::__libc)).secure != 0 }
+}
+#[cfg(test)]
+fn loader_secure() -> bool {
+    false
+}
+
+/// `LD_LIBRARY_PATH` as the loader sees it: nothing when secure, the
+/// live value otherwise. musl snapshots it once at startup
+/// (`dynlink.c:1827`); reading it per call is simpler and differs only
+/// if the environment changes mid-run, which the loader never does on
+/// purpose. Split by cfg for the same reason as [`loader_secure`].
+#[cfg(all(not(test), target_arch = "x86_64"))]
+fn live_env_path() -> *const c_char {
+    if loader_secure() {
+        core::ptr::null()
+    } else {
+        unsafe { crate::start::getenv(c"LD_LIBRARY_PATH".as_ptr()) }
+    }
+}
+#[cfg(test)]
+fn live_env_path() -> *const c_char {
+    core::ptr::null()
+}
+
+/// Does `name` contain a `/`? Only bare sonames go through the
+/// search paths; an explicit pathname opens directly (musl
+/// `dynlink.c:1111`).
+fn has_slash(name: *const c_char) -> bool {
+    unsafe {
+        let mut k = 0usize;
+        while *name.add(k) != 0 {
+            if *name.add(k) == b'/' as c_char {
+                return true;
+            }
+            k += 1;
+        }
+        false
+    }
+}
+
+/// musl `path_open` (`dynlink.c:875-899`): try `name` under every
+/// colon/newline-separated directory in `list`, writing each candidate
+/// into `buf`.
+///
+/// Returns the fd, -1 when nothing matched (keep searching), or -2 when
+/// an open failed with an errno outside
+/// `ENOENT`/`ENOTDIR`/`EACCES`/`ENAMETOOLONG` (inhibit the whole
+/// search, musl `:890-896`). An over-long candidate is skipped without
+/// opening, same as musl's failed `snprintf` bounds check.
+#[cfg(target_arch = "x86_64")]
+unsafe fn path_open(
+    name: *const c_char,
+    list: *const c_char,
+    buf: *mut u8,
+    buf_size: usize,
+) -> c_int {
+    unsafe {
+        let mut nl = 0usize;
+        while *name.add(nl) != 0 {
+            nl += 1;
+        }
+        let mut s = list;
+        loop {
+            while *s == b':' as c_char || *s == b'\n' as c_char {
+                s = s.add(1);
+            }
+            if *s == 0 {
+                return -1;
+            }
+            let mut l = 0usize;
+            while *s.add(l) != 0 && *s.add(l) != b':' as c_char && *s.add(l) != b'\n' as c_char {
+                l += 1;
+            }
+            if l + 1 + nl < buf_size {
+                crate::mem::memcpy(buf as *mut c_void, s as *const c_void, l);
+                *buf.add(l) = b'/';
+                crate::mem::memcpy(buf.add(l + 1) as *mut c_void, name as *const c_void, nl + 1);
+                let fd = super::dso::open_object(buf as *const c_char);
+                if fd >= 0 {
+                    return fd;
+                }
+                match crate::errno::errno_load(crate::errno::__errno_location()) {
+                    ENOENT | ENOTDIR | EACCES | ENAMETOOLONG => {}
+                    _ => return -2,
+                }
+            }
+            s = s.add(l);
+        }
+    }
+}
+
+/// Length of the `$ORIGIN` word at `s`: 7 for `$ORIGIN`, 9 for
+/// `${ORIGIN}`, 0 for anything else (musl `dynlink.c:913-918` accepts
+/// exactly these two spellings).
+fn origin_word_len(s: *const c_char) -> usize {
+    unsafe {
+        if *s.add(1) == b'{' as c_char {
+            for (i, b) in b"{ORIGIN}".iter().enumerate() {
+                if *s.add(1 + i) as u8 != *b {
+                    return 0;
+                }
+            }
+            9
+        } else {
+            for (i, b) in b"ORIGIN".iter().enumerate() {
+                if *s.add(1 + i) as u8 != *b {
+                    return 0;
+                }
+            }
+            7
+        }
+    }
+}
+
+/// musl `fixup_rpath` (`dynlink.c:901-976`): expand `$ORIGIN` in
+/// `p->rpath_orig` into `p->rpath`, or share the string when there is
+/// nothing to expand.
+///
+/// Returns 0, or -1 when the expansion cannot be built (inhibits the
+/// search, musl `:948-958`). A `$` that is not `$ORIGIN`/`${ORIGIN}`
+/// leaves `rpath` null — the entry is skipped, not failed (musl
+/// `:917-920`).
+///
+/// # Safety
+///
+/// `p` must be a valid `Dso`; `buf` must be writable for `buf_size`
+/// bytes (scratch for the `/proc/self/exe` read).
+#[cfg(target_arch = "x86_64")]
+unsafe fn fixup_rpath(p: *mut Dso, buf: *mut u8, buf_size: usize) -> c_int {
+    unsafe {
+        if !(*p).rpath.is_null() || (*p).rpath_orig.is_null() {
+            return 0;
+        }
+        let orig = (*p).rpath_orig;
+        // Fast path and validation in one scan: share the string when
+        // there is no `$`, count the words, reject any other `$` use.
+        let mut n = 0usize;
+        let mut k = 0usize;
+        let mut has_dollar = false;
+        while *orig.add(k) != 0 {
+            if *orig.add(k) == b'$' as c_char {
+                has_dollar = true;
+                if origin_word_len(orig.add(k)) == 0 {
+                    return 0;
+                }
+                n += 1;
+            }
+            k += 1;
+        }
+        if !has_dollar {
+            (*p).rpath = (*p).rpath_orig;
+            return 0;
+        }
+        if n > isize::MAX as usize / 4096 {
+            return 0;
+        }
+        // Origin: dirname of `/proc/self/exe` for the main program, of
+        // the object's own path for a library (musl `:943-971`).
+        let origin: *const c_char = if (*p).kernel_mapped != 0 {
+            if loader_secure() {
+                return 0;
+            }
+            let r = super::dso::readlink(c"/proc/self/exe".as_ptr(), buf as *mut c_char, buf_size);
+            if r < 0 {
+                match crate::errno::errno_load(crate::errno::__errno_location()) {
+                    ENOENT | ENOTDIR | EACCES => return 0,
+                    _ => return -1,
+                }
+            }
+            if r as usize >= buf_size {
+                return 0;
+            }
+            *buf.add(r as usize) = 0;
+            buf as *const c_char
+        } else {
+            (*p).name
+        };
+        let mut last = origin;
+        let mut t = origin;
+        while *t != 0 {
+            if *t == b'/' as c_char {
+                last = t;
+            }
+            t = t.add(1);
+        }
+        let (origin, l): (*const c_char, usize) = if last == origin && *origin != b'/' as c_char {
+            // No `/` at all (musl `:964-971`): relative to `.`.
+            (b".".as_ptr() as *const c_char, 1)
+        } else {
+            (origin, (last as usize).wrapping_sub(origin as usize))
+        };
+        if loader_secure() && *origin != b'/' as c_char {
+            return 0;
+        }
+        let mem = crate::malloc::malloc(k + n * l + 1) as *mut u8;
+        if mem.is_null() {
+            return -1;
+        }
+        let mut d = mem;
+        let mut s = orig;
+        while *s != 0 {
+            if *s == b'$' as c_char {
+                crate::mem::memcpy(d as *mut c_void, origin as *const c_void, l);
+                d = d.add(l);
+                s = s.add(origin_word_len(s));
+            } else {
+                *d = *s as u8;
+                d = d.add(1);
+                s = s.add(1);
+            }
+        }
+        *d = 0;
+        (*p).rpath = mem as *mut c_char;
+        0
+    }
+}
+
+/// Bare-soname search (musl `dynlink.c:1120-1165` minus the
+/// `/etc/ld-musl-*.path` config file): `LD_LIBRARY_PATH` unless secure,
+/// then each `needed_by` ancestor's `RPATH`/`RUNPATH` with `$ORIGIN`
+/// expansion, then the system defaults.
+///
+/// `env_path` arrives resolved by the caller so tests can drive every
+/// branch without process state. Returns the fd, -1 when nothing
+/// matched, -2 when a failure inhibited the whole search.
+///
+/// shortcut(/etc/ld-musl-arch.path): musl reads an admin opt-in config
+/// file before falling back to the defaults (`dynlink.c:1129-1163`).
+/// No container ships it, and when absent musl behaves exactly like
+/// this function. Adopt it when a real image needs it.
+///
+/// # Safety
+///
+/// `name` must be a bare soname (no `/`); `buf` writable for `buf_size`.
+#[cfg(target_arch = "x86_64")]
+unsafe fn search_bare(
+    name: *const c_char,
+    needed_by: *mut Dso,
+    env_path: *const c_char,
+    buf: *mut u8,
+    buf_size: usize,
+) -> c_int {
+    unsafe {
+        let mut fd = -1;
+        if !env_path.is_null() {
+            fd = path_open(name, env_path, buf, buf_size);
+        }
+        let mut p = needed_by;
+        while fd == -1 && !p.is_null() {
+            if fixup_rpath(p, buf, buf_size) < 0 {
+                fd = -2;
+            }
+            if !(*p).rpath.is_null() {
+                fd = path_open(name, (*p).rpath, buf, buf_size);
+            }
+            p = (*p).needed_by;
+        }
+        if fd == -1 {
+            fd = path_open(name, DEFAULT_PATHS.as_ptr() as *const c_char, buf, buf_size);
+        }
+        fd
+    }
+}
+
+/// musl `load_library` (`dynlink.c:1057-1260`): the self-name check,
+/// both dedup layers, search paths, open, `map_object`, link. The only
+/// deliberately missing search step is `/etc/ld-musl-*.path` (see
+/// [`search_bare`]).
 ///
 /// The search paths are the remaining gap and are additive: a name with
 /// a `/` is opened directly, and a bare soname is only satisfied by an
@@ -283,7 +571,7 @@ fn ldso_name() -> *mut c_char {
 ///
 /// Contract of [`LoadFn`].
 #[cfg(target_arch = "x86_64")]
-pub unsafe fn load_library(name: *const c_char, _needed_by: *mut Dso) -> *mut Dso {
+pub unsafe fn load_library(name: *const c_char, needed_by: *mut Dso) -> *mut Dso {
     unsafe {
         if *name == 0 {
             return null_mut();
@@ -311,8 +599,29 @@ pub unsafe fn load_library(name: *const c_char, _needed_by: *mut Dso) -> *mut Ds
         if !hit.is_null() {
             return hit;
         }
-        // Layer 3: same file, different path.
-        let fd = super::dso::open_object(name);
+        // Open: explicit pathnames directly, bare sonames through the
+        // search order (musl `dynlink.c:1111-1165`). Over-long bare
+        // names are refused before any I/O (musl `:1119`).
+        let mut pathbuf = [0u8; 4096];
+        let (fd, pathname): (c_int, *const c_char) = if has_slash(name) {
+            (super::dso::open_object(name), name)
+        } else {
+            if super::reloc::c_strlen(name) > 255 {
+                return null_mut();
+            }
+            let fd = search_bare(
+                name,
+                needed_by,
+                live_env_path(),
+                pathbuf.as_mut_ptr(),
+                pathbuf.len(),
+            );
+            if fd < 0 {
+                super::dlapi::set_error(b"cannot open shared object");
+                return null_mut();
+            }
+            (fd, pathbuf.as_ptr() as *const c_char)
+        };
         if fd < 0 {
             super::dlapi::set_error(b"cannot open shared object");
             return null_mut();
@@ -328,7 +637,8 @@ pub unsafe fn load_library(name: *const c_char, _needed_by: *mut Dso) -> *mut Ds
         }
         // musl allocates the struct plus the name in one block
         // (`:1209`); the trailing name is what `dso->name` points at.
-        let name_len = super::reloc::c_strlen(name);
+        // Stored is the *resolved* pathname, not the request.
+        let name_len = super::reloc::c_strlen(pathname);
         let block = crate::malloc::malloc(size_of::<Dso>() + name_len + 1);
         if block.is_null() {
             super::dso::close_object(fd);
@@ -339,10 +649,11 @@ pub unsafe fn load_library(name: *const c_char, _needed_by: *mut Dso) -> *mut Ds
         let name_ptr = (block as *mut u8).add(size_of::<Dso>()).cast::<c_char>();
         crate::mem::memcpy(
             name_ptr.cast::<core::ffi::c_void>(),
-            name.cast::<core::ffi::c_void>(),
+            pathname.cast::<core::ffi::c_void>(),
             name_len + 1,
         );
         (*p).name = name_ptr;
+        (*p).needed_by = needed_by;
         (*p).dev = st_dev;
         (*p).ino = st_ino;
         if super::dso::map_object(fd, p) != 0 {
@@ -352,7 +663,12 @@ pub unsafe fn load_library(name: *const c_char, _needed_by: *mut Dso) -> *mut Ds
             return null_mut();
         }
         super::dso::close_object(fd);
-        (*p).shortname = last_component(name_ptr);
+        // musl only assigns a shortname when the resolved path differed
+        // from the request (`dynlink.c:1230`): an explicit pathname
+        // passed through untouched is never findable by this layer.
+        if pathname != name {
+            (*p).shortname = last_component(name_ptr);
+        }
         linkmap::append_namespace(p);
         p
     }
@@ -420,6 +736,133 @@ mod tests {
     /// entry points.
     fn c_str(s: &str) -> std::ffi::CString {
         std::ffi::CString::new(s).unwrap()
+    }
+
+    /// `path_open` tries every directory in order and stops at the
+    /// first hit; a missing name exhausts the list. Uses the real
+    /// filesystem (`/bin/sh` exists on any Linux CI/dev machine, same
+    /// assumption the `/proc` tests elsewhere already make).
+    #[test]
+    fn path_open_finds_first_hit() {
+        let _guard = lock();
+        unsafe {
+            let mut buf = [0u8; 4096];
+            let fd = path_open(
+                c"sh".as_ptr(),
+                c"/nope-zzz:/bin:/usr/bin".as_ptr(),
+                buf.as_mut_ptr(),
+                buf.len(),
+            );
+            assert!(fd >= 0, "sh must be found under /bin or /usr/bin");
+            super::super::dso::close_object(fd);
+            let missing = path_open(
+                c"definitely-not-here-zzz".as_ptr(),
+                c"/bin:/usr/bin".as_ptr(),
+                buf.as_mut_ptr(),
+                buf.len(),
+            );
+            assert_eq!(missing, -1);
+        }
+    }
+
+    /// `fixup_rpath` shares the string when there is no `$`, rejects a
+    /// `$` that is not `$ORIGIN`, and expands `$ORIGIN` against the
+    /// dirname of a library's own path.
+    #[test]
+    fn fixup_rpath_expands_origin_for_libraries() {
+        let _guard = lock();
+        unsafe {
+            let mut plain: Dso = core::mem::zeroed();
+            let rpath = c"/a:/b".as_ptr() as *mut c_char;
+            plain.rpath_orig = rpath;
+            let mut buf = [0u8; 4096];
+            assert_eq!(
+                fixup_rpath(&mut plain as *mut Dso, buf.as_mut_ptr(), buf.len()),
+                0
+            );
+            assert_eq!(plain.rpath, rpath, "shared, not copied");
+
+            let mut bad: Dso = core::mem::zeroed();
+            bad.rpath_orig = c"/a/$FOO/b".as_ptr() as *mut c_char;
+            assert_eq!(
+                fixup_rpath(&mut bad as *mut Dso, buf.as_mut_ptr(), buf.len()),
+                0
+            );
+            assert!(bad.rpath.is_null(), "unexpandable entry is skipped");
+
+            let mut lib: Dso = core::mem::zeroed();
+            lib.name = c"/x/y/libz.so".as_ptr() as *mut c_char;
+            lib.rpath_orig = c"$ORIGIN/lib:${ORIGIN}/extra".as_ptr() as *mut c_char;
+            assert_eq!(
+                fixup_rpath(&mut lib as *mut Dso, buf.as_mut_ptr(), buf.len()),
+                0
+            );
+            assert!(!lib.rpath.is_null());
+            let got = core::slice::from_raw_parts(lib.rpath as *const u8, 17);
+            assert_eq!(
+                got, b"/x/y/lib:/x/y/ext",
+                "both spellings expand to the dirname"
+            );
+            crate::malloc::free(lib.rpath as *mut core::ffi::c_void);
+        }
+    }
+
+    /// `search_bare` honors `LD_LIBRARY_PATH` unless secure: `/proc`
+    /// is in no default path, so `version` is found only through the
+    /// environment. This is the exact gate `libc.secure` closes.
+    #[test]
+    fn search_bare_gates_env_on_secure() {
+        let _guard = lock();
+        unsafe {
+            let mut buf = [0u8; 4096];
+            let env = c"/proc".as_ptr();
+            let found = search_bare(
+                c"version".as_ptr(),
+                core::ptr::null_mut(),
+                env,
+                buf.as_mut_ptr(),
+                buf.len(),
+            );
+            assert!(found >= 0, "insecure search reads LD_LIBRARY_PATH");
+            super::super::dso::close_object(found);
+            // Secure: env skipped, needed_by empty, defaults lack
+            // /proc — nothing to find. `secure` is not passed here;
+            // the null env models what `live_env_path` hands out when
+            // `loader_secure()` is true.
+            let missing = search_bare(
+                c"version".as_ptr(),
+                core::ptr::null_mut(),
+                core::ptr::null(),
+                buf.as_mut_ptr(),
+                buf.len(),
+            );
+            assert_eq!(missing, -1);
+        }
+    }
+
+    /// A `needed_by` ancestor's `RUNPATH` is searched after the
+    /// environment (musl `dynlink.c:1122-1128`).
+    #[test]
+    fn search_bare_walks_needed_by_rpath() {
+        let _guard = lock();
+        unsafe {
+            let mut buf = [0u8; 4096];
+            let mut app: Dso = core::mem::zeroed();
+            app.rpath_orig = c"/bin".as_ptr() as *mut c_char;
+            assert_eq!(
+                fixup_rpath(&mut app as *mut Dso, buf.as_mut_ptr(), buf.len()),
+                0
+            );
+            let found = search_bare(
+                c"sh".as_ptr(),
+                &mut app as *mut Dso,
+                core::ptr::null(),
+                buf.as_mut_ptr(),
+                buf.len(),
+            );
+            assert!(found >= 0, "ancestor RPATH is searched");
+            super::super::dso::close_object(found);
+        }
     }
 
     /// Loader that refuses everything: the walk must still terminate and

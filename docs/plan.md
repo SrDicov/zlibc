@@ -421,6 +421,19 @@ use-after-unmap nondeterminista.
   a hit). `sizeof(Elf64Phdr)` is 56, and `struct stat` is only modelled
   as far as the two fields the dedup key reads — offsets 0 and 8, named
   in the doc rather than guessed.
+  Search-paths packet DONE (`src/ldso/boot.rs`): `LD_LIBRARY_PATH`
+  unless `libc.secure`, each `needed_by` ancestor's `RPATH`/`RUNPATH`
+  with `$ORIGIN` expansion, then `/lib:/usr/local/lib:/usr/lib` —
+  with `path_open`'s -1/-2 continue/inhibit distinction intact and
+  `RUNPATH`-wins decoding already in `decode_dyn`. New exports on the
+  way: `getenv` (pure `getenv_in` behind it, tested) and `readlink`
+  (only used for `/proc/self/exe` in `$ORIGIN`). Deliberately missing:
+  `/etc/ld-musl-*.path`, as a `shortcut:` — no image ships it, and
+  absent it behaves exactly like this code. `load_library` now stores
+  the *resolved* pathname, sets `needed_by`, and only assigns a
+  shortname when the path differed from the request. Lesson: musl
+  snapshots `LD_LIBRARY_PATH` once at startup; reading it per call
+  differs only if the environment changes mid-run — noted, not fixed.
   Next: the 6E musl-gcc gate. Scope, per review: a hello proves the
   loader boots, not that it is compatible. Five binaries minimum:
   (a) one with `DT_NEEDED` on our own `.so`, (b) one

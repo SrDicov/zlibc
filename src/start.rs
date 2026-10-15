@@ -126,6 +126,47 @@ static mut EMPTY_ENV: [*mut c_char; 1] = [core::ptr::null_mut()];
 pub static mut __environ: *mut *mut c_char =
     core::ptr::addr_of_mut!(EMPTY_ENV).cast::<*mut c_char>();
 
+/// Pure scan behind [`getenv`]: first `envp` entry starting with
+/// `name` followed by `=`, value part returned. Testable without
+/// process state; [`getenv`] is the same scan over [`__environ`].
+///
+/// # Safety
+///
+/// `envp` must be a null-terminated array of valid strings; `name` a
+/// valid NUL-terminated string.
+fn getenv_in(envp: *const *mut c_char, name: *const c_char) -> *const c_char {
+    unsafe {
+        let mut nl = 0usize;
+        while *name.add(nl) != 0 {
+            nl += 1;
+        }
+        let mut i = 0usize;
+        while !(*envp.add(i)).is_null() {
+            let e = *envp.add(i);
+            let mut k = 0usize;
+            while k < nl && *e.add(k) == *name.add(k) {
+                k += 1;
+            }
+            if k == nl && *e.add(nl) == b'=' as c_char {
+                return e.add(nl + 1);
+            }
+            i += 1;
+        }
+        core::ptr::null()
+    }
+}
+
+/// musl `getenv` (`src/env/getenv.c`).
+///
+/// # Safety
+///
+/// `name` must be a valid NUL-terminated string.
+#[cfg(not(test))]
+#[no_mangle]
+pub unsafe extern "C" fn getenv(name: *const c_char) -> *mut c_char {
+    unsafe { getenv_in(__environ as *const *mut c_char, name) as *mut c_char }
+}
+
 // musl `src/env/__environ.c:4-6`: three weak names, one variable.
 #[cfg(not(test))]
 crate::weak_alias!(___environ, __environ);
@@ -443,7 +484,8 @@ crate::weak_alias!(__libc_start_init, __start_dummy);
 
 #[cfg(test)]
 mod tests {
-    use super::{auxv_fill, progname_short, AT_HWCAP, AT_NULL, AT_PAGESZ, AUX_CNT};
+    use super::{auxv_fill, getenv_in, progname_short, AT_HWCAP, AT_NULL, AT_PAGESZ, AUX_CNT};
+    use core::ffi::c_char;
 
     fn fill(words: &[usize]) -> [usize; AUX_CNT] {
         let mut table = [0usize; AUX_CNT];
@@ -490,6 +532,30 @@ mod tests {
     /// pointer, so `*__environ` is NULL before `__init_libc` installs the
     /// real `envp`. (`__init_libc` itself writes process-global state and
     /// stays out of tests, like the rest of this module's runtime half.)
+    /// `getenv_in` matches on the full name plus `=`: a longer name
+    /// sharing the prefix must not match, and a missing name is null.
+    #[test]
+    fn getenv_in_matches_name_equals() {
+        let a = c"A=1";
+        let aa = c"AA=2";
+        let b = c"B=";
+        let envp = [
+            a.as_ptr() as *mut c_char,
+            aa.as_ptr() as *mut c_char,
+            b.as_ptr() as *mut c_char,
+            core::ptr::null_mut(),
+        ];
+        let val = getenv_in(envp.as_ptr(), c"A".as_ptr());
+        assert_eq!(val, unsafe { a.as_ptr().add(2) });
+        assert_eq!(getenv_in(envp.as_ptr(), c"B".as_ptr()), unsafe {
+            b.as_ptr().add(2)
+        });
+        assert!(getenv_in(envp.as_ptr(), c"C".as_ptr()).is_null());
+        assert!(
+            getenv_in(envp.as_ptr(), c"AA".as_ptr()) != getenv_in(envp.as_ptr(), c"A".as_ptr())
+        );
+    }
+
     #[test]
     fn empty_env_is_null_terminated() {
         let slot = unsafe { core::ptr::addr_of!(super::EMPTY_ENV).read()[0] };

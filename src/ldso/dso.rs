@@ -393,6 +393,20 @@ pub unsafe fn close_object(fd: c_int) -> c_int {
     crate::__syscall!(SYS_CLOSE, fd) as c_int
 }
 
+/// musl `readlink`: length placed in `buf`, or -1 with errno set.
+/// The loader uses it for exactly one thing: resolving
+/// `/proc/self/exe` when expanding `$ORIGIN` for the main program
+/// (musl `fixup_rpath`, `dynlink.c:948-958`).
+///
+/// # Safety
+///
+/// `path` must be NUL-terminated; `buf` must be writable for `size` bytes.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn readlink(path: *const c_char, buf: *mut c_char, size: usize) -> isize {
+    crate::__syscall!(super::SYS_READLINK, path, buf, size)
+}
+
 /// `p_flags` → `mmap` prot (`PF_R/W/X` → `PROT_READ/WRITE/EXEC`;
 /// musl spreads the same mapping across `map_library`).
 fn prot_from_flags(flags: u32) -> c_int {
