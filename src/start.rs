@@ -101,11 +101,14 @@ pub static mut __progname_full: *mut c_char = c"".as_ptr() as *mut c_char;
 
 // musl `src/internal/libc.c:8-9`: both pointers are also visible under
 // their `program_invocation_*` names. `weak_alias!` is plain `.weak` +
-// `.set`, so it aliases data exactly like functions.
+// `.set`, so it aliases data exactly like functions. Note the argument
+// order is `(new, old)` — the reverse of musl's `weak_alias(old, new)`
+// — getting it backwards declares the real symbol weak and fails the
+// build with "changed binding to STB_GLOBAL".
 #[cfg(not(test))]
-crate::weak_alias!(__progname, program_invocation_short_name);
+crate::weak_alias!(program_invocation_short_name, __progname);
 #[cfg(not(test))]
-crate::weak_alias!(__progname_full, program_invocation_name);
+crate::weak_alias!(program_invocation_name, __progname_full);
 
 /// musl `src/env/__stack_chk_fail.c:5` (`uintptr_t __stack_chk_guard`).
 #[cfg(not(test))]
