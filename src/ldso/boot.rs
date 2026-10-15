@@ -284,18 +284,17 @@ mod tests {
     fn app_dso_reads_phdrs() {
         let _guard = lock();
         unsafe {
-            // Elf64Phdr is 8 u64 slots: type, flags, offset, vaddr,
-            // paddr, filesz, memsz, align. Put PT_TLS in header 2.
+            // Elf64Phdr is 7 u64 slots: p_type and p_flags are both u32
+            // and share the first one. Put PT_TLS in header 2.
             let mut phdrs = [0u64; 32];
-            const TLS_PH: usize = 2 * 8;
-            phdrs[TLS_PH] = PT_TLS as u64;
-            phdrs[TLS_PH + 1] = 4; // p_flags
-            phdrs[TLS_PH + 2] = 0x1000; // p_offset
-            phdrs[TLS_PH + 3] = 0x1000; // p_vaddr
-            phdrs[TLS_PH + 4] = 0x1000; // p_paddr
-            phdrs[TLS_PH + 5] = 8; // p_filesz: the initialized part
-            phdrs[TLS_PH + 6] = 32; // p_memsz
-            phdrs[TLS_PH + 7] = 16; // p_align
+            const TLS_PH: usize = 2 * 7;
+            phdrs[TLS_PH] = PT_TLS as u64 | ((4u64) << 32); // type | flags
+            phdrs[TLS_PH + 1] = 0x1000; // p_offset
+            phdrs[TLS_PH + 2] = 0x1000; // p_vaddr
+            phdrs[TLS_PH + 3] = 0x1000; // p_paddr
+            phdrs[TLS_PH + 4] = 8; // p_filesz: the initialized part
+            phdrs[TLS_PH + 5] = 32; // p_memsz
+            phdrs[TLS_PH + 6] = 16; // p_align
             let mut aux = [0usize; AUX_CNT];
             aux[AT_PHDR] = phdrs.as_mut_ptr() as usize;
             aux[AT_PHNUM] = 3;
