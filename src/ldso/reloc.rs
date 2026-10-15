@@ -214,7 +214,9 @@ unsafe fn fatal(dso: *const c_char, sym: *const c_char, detail: &[u8]) -> ! {
 #[cfg(target_arch = "x86_64")]
 #[unsafe(naked)]
 pub extern "C" fn __tlsdesc_static() -> isize {
-    core::arch::naked_asm!("mov 8(%rax), %rax", "ret")
+    // `att_syntax` matches musl's `tlsdesc.s` verbatim, and matches the
+    // idiom already used for `%fs` access in `thread/tls.rs`.
+    core::arch::naked_asm!("mov 8(%rax), %rax", "ret", options(att_syntax))
 }
 
 /// musl `__tlsdesc_dynamic` (`tlsdesc.s:12-23`): the second word of the
@@ -240,6 +242,7 @@ pub extern "C" fn __tlsdesc_dynamic() -> isize {
         "sub %fs:0, %rax",
         "pop %rdx",
         "ret",
+        options(att_syntax),
     )
 }
 
