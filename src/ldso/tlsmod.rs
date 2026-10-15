@@ -130,7 +130,11 @@ pub unsafe fn init_first_module(
         (*m).image = image as *mut core::ffi::c_void;
         (*m).len = filesz;
         (*m).size = memsz;
-        (*m).align = if align < MIN_TLS_ALIGN { MIN_TLS_ALIGN } else { align };
+        (*m).align = if align < MIN_TLS_ALIGN {
+            MIN_TLS_ALIGN
+        } else {
+            align
+        };
         let padded = pad_size(image, (*m).size, (*m).align);
         (*m).size = padded;
         // x86_64 has no TLS_ABOVE_TP: the offset is a downward distance
