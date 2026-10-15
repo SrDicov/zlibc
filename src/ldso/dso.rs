@@ -403,11 +403,7 @@ pub unsafe fn close_object(fd: c_int) -> c_int {
 /// `path` must be NUL-terminated; `buf` must be writable for `size` bytes.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
-pub unsafe extern "C" fn readlink(
-    path: *const c_char,
-    buf: *mut c_char,
-    size: usize,
-) -> isize {
+pub unsafe extern "C" fn readlink(path: *const c_char, buf: *mut c_char, size: usize) -> isize {
     crate::__syscall!(super::SYS_READLINK, path, buf, size)
 }
 

@@ -534,14 +534,21 @@ mod tests {
         let a = c"A=1";
         let aa = c"AA=2";
         let b = c"B=";
-        let envp = [a.as_ptr() as *mut c_char, aa.as_ptr() as *mut c_char, b.as_ptr() as *mut c_char, core::ptr::null_mut()];
+        let envp = [
+            a.as_ptr() as *mut c_char,
+            aa.as_ptr() as *mut c_char,
+            b.as_ptr() as *mut c_char,
+            core::ptr::null_mut(),
+        ];
         let val = getenv_in(envp.as_ptr(), c"A".as_ptr());
         assert_eq!(val, unsafe { a.as_ptr().add(2) });
         assert_eq!(getenv_in(envp.as_ptr(), c"B".as_ptr()), unsafe {
             b.as_ptr().add(2)
         });
         assert!(getenv_in(envp.as_ptr(), c"C".as_ptr()).is_null());
-        assert!(getenv_in(envp.as_ptr(), c"AA".as_ptr()) != getenv_in(envp.as_ptr(), c"A".as_ptr()));
+        assert!(
+            getenv_in(envp.as_ptr(), c"AA".as_ptr()) != getenv_in(envp.as_ptr(), c"A".as_ptr())
+        );
     }
 
     #[test]
