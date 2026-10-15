@@ -397,9 +397,23 @@ that `-O0` cannot see.
   (slot was consistently `fatal - 8`). Fixed with a single
   `#[inline(never)]` accessor used by both — the contract is "the slot
   holds the resolver", not "equals this cast expression".
-- **`assert!(f(), "{}", f())` is two calls, not one.** The oversize
-  contract asserts printed `0x0` while failing: the condition's call and
-  the message's call diverged at `-O2`. Bind once, assert on the local.
+- **Our `malloc` symbol carries the exact name LLVM recognizes as a
+  `LibFunc`.** Caller-side `-O2` therefore applies its
+  allocation-size analysis: a call whose size may exceed `isize::MAX`
+  becomes `undef`, and `undef.is_null()` may be either — so
+  `edge_contracts_match_musl` failed at `-O2` and passed at `-O0`, and
+  adding a *second* use of the pointer (an `eprintln!`, or the assert
+  message) flipped the verdict. Disassembly confirmed the emitted
+  `malloc` is a correct 4-instruction wrapper around `aligned_body`:
+  nothing in zlibc was wrong. Two fixes, both in tests:
+  `black_box` on the argument (keeps the call real) *and* on the result
+  (stops LLVM folding the null test). GCC folds the same call
+  (`-Walloc-size-larger-than`) and glibc still answers NULL, so the
+  runtime contract is unchanged. The engine-level test
+  (`engine_rejects_oversize_directly`) is immune — `aligned_body` is
+  not a LibFunc name — so the oversize contract stays genuinely
+  verified. Lesson: a symbol we must export under a compiler-known name
+  is an ABI surface that changes how *callers* compile.
 - **A death test that can pass by accident.** `free(p); free(p)` did not
   trip detection at `-O2`; adding a reclaim round-trip
   (`free(p); q = malloc(); assert_eq!(q, p); free(q); free(p)`) both
