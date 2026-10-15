@@ -482,7 +482,7 @@ unsafe fn fixup_rpath(p: *mut Dso, buf: *mut u8, buf_size: usize) -> c_int {
             // No `/` at all (musl `:964-971`): relative to `.`.
             (b".".as_ptr() as *const c_char, 1)
         } else {
-            (origin, last.wrapping_sub(origin) as usize)
+            (origin, (last as usize).wrapping_sub(origin as usize))
         };
         if loader_secure() && *origin != b'/' as c_char {
             return 0;
