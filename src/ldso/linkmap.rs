@@ -476,7 +476,10 @@ mod tests {
             let mut app_str = *b"libB.so\0libC.so\0\0";
             let mut b_str = *b"libD.so\0\0\0\0";
             let mut empty = [0u8; 8];
-            let mut app_dyn = [DT_NEEDED, 0usize, DT_NEEDED, 6usize, DT_NULL, 0];
+            // "libB.so\0" is 8 bytes, so libC.so starts at offset 8. Offsets are
+// strtab positions: counting them by eye is how this test first read
+// 'o' instead of "libC.so".
+            let mut app_dyn = [DT_NEEDED, 0usize, DT_NEEDED, 8usize, DT_NULL, 0];
             let mut one_need = [DT_NEEDED, 0usize, DT_NULL, 0];
             let mut none = [DT_NULL, 0usize];
 
@@ -577,7 +580,8 @@ mod tests {
             let mut b = zeroed_dso();
             let mut strs = *b"libMissing.so\0libB.so\0\0";
             let mut empty = [0u8; 8];
-            let mut needs = [DT_NEEDED, 0usize, DT_NEEDED, 13usize, DT_NULL, 0];
+            // "libMissing.so\0" is 14 bytes, so libB.so starts at offset 14.
+            let mut needs = [DT_NEEDED, 0usize, DT_NEEDED, 14usize, DT_NULL, 0];
             app.name = strs.as_ptr() as *mut c_char;
             app.strings = strs.as_mut_ptr() as *mut c_char;
             app.dynv = needs.as_mut_ptr();
