@@ -386,8 +386,18 @@ use-after-unmap nondeterminista.
   `tools/musl-exports.txt` is the baseline. Also recorded: musl's
   `libc.so` has **no `DT_SONAME`**, which matters for the 6E
   substitution point.
-  Next: 6D-2 `libdl` (`dlopen`/`dlsym`/`dlclose`/`dlerror`), 6E
-  musl-gcc gate.
+  Packet 6D-2 DONE (`src/ldso/dlapi.rs`): `dlsym`, `dlerror`, `dlclose`
+  and the pieces `dlopen` calls. Three surprises worth recording:
+  `dlclose` **never unloads** — it validates the handle against the live
+  namespace, returns 0, and nothing is ever unmapped (musl has no
+  refcount). `dlerror` is per-thread with a `sizeof(void*)` floor on the
+  buffer because it doubles as a list link. And `dlsym` is musl's
+  two-instruction adapter (`dlsym.s`): `mov (%rsp),%rdx; jmp __dlsym` —
+  the third argument is the caller's return address, which is how
+  `RTLD_NEXT` knows who asked. `RTLD_NOW`/`RTLD_NODELETE` are accepted
+  and ignored, exactly like musl.
+  Next: `dlopen` proper (path search + the load/reloc/ctor sequence),
+  6E musl-gcc gate.
 - **Audit batch (v0.11, all green, 73 tests):** three parallel audits,
   every load-bearing finding fixed + tested — pre-clone registry link
   (detached-child UAF), honest `raw_clone` clobbers, magic-gated canary,
