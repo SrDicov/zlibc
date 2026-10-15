@@ -23,13 +23,12 @@
 use core::ffi::{c_char, c_int};
 use core::ptr::null_mut;
 
-use super::dso::Dso;
+use super::dso::{decode_vec, Dso};
 use super::linkmap::{self, LoadFn};
 use super::reloc::do_relocs;
 use super::{
-    decode_vec, search_vec, AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM, AUX_CNT, DT_JMPREL, DT_NULL,
-    DT_PLTREL, DT_PLTRELSZ, DT_REL, DT_RELA, DT_RELASZ, DT_RELR, DT_RELRSZ, DT_RELSZ, DYN_CNT,
-    PT_DYNAMIC, PT_INTERP, PT_TLS,
+    AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM, AUX_CNT, DT_JMPREL, DT_PLTREL, DT_PLTRELSZ, DT_REL,
+    DT_RELA, DT_RELASZ, DT_RELR, DT_RELRSZ, DT_RELSZ, DYN_CNT, PT_DYNAMIC, PT_INTERP, PT_TLS,
 };
 
 /// musl `reloc_all` (`dynlink.c:1412-1440`) for one object: PLT, then
@@ -82,9 +81,9 @@ pub unsafe fn reloc_all(head: *mut Dso, dso: *mut Dso, skip_relative: bool) {
             let mut left = dynv[DT_RELRSZ];
             let mut p = laddr(dynv[DT_RELR]);
             while left >= size_of::<usize>() {
+                let mut base_idx = 0usize;
                 if *p & 1 == 1 {
                     let mut bits = *p >> 1;
-                    let mut base_idx = 0usize;
                     while bits != 0 {
                         if bits & 1 == 1 && !skip_relative {
                             let slot = base.wrapping_add((base_idx + 1) * size_of::<usize>());
@@ -252,34 +251,26 @@ mod tests {
         }
     }
 
-    /// `skip_relative` is set for the main program only: `_dlstart`
-    /// already applied its `RELATIVE` entries.
+    /// `reloc_all` marks the object done and is idempotent, and the
+    /// `skip_relative` flag is what keeps `_dlstart`'s already-applied
+    /// `RELATIVE` entries from being applied twice.
     #[test]
-    fn reloc_all_skips_relative_for_the_program() {
+    fn reloc_all_marks_done_once() {
         let _guard = lock();
         unsafe {
             let mut mem = [0usize; 8];
-            let base = mem.as_mut_ptr();
             let mut dso: Dso = core::mem::zeroed();
-            dso.base = base as *mut u8;
-            let mut raw = [0usize; 8];
-            // One RELATIVE relocation at offset 0 writing base+0x10.
-            raw[0] = DT_RELA;
-            raw[1] = 0x100; // DT_RELA address (synthetic, relative to base)
-            raw[2] = 0x30; // DT_RELASZ = 3 words
-            raw[3] = DT_RELA;
-            raw[4] = 0x100;
-            raw[5] = 0x30;
-            raw[6] = DT_NULL;
-            raw[7] = 0;
+            dso.base = mem.as_mut_ptr() as *mut u8;
+            let mut raw = [0usize; 2];
+            raw[0] = super::DT_NULL;
+            raw[1] = 0;
             dso.dynv = raw.as_mut_ptr();
-            // base 0x100 lands inside `mem` for the synthetic table.
-            let _ = base;
-            // Nothing to relocate: the synthetic addresses are not
-            // mapped, so this only asserts the guard fires and the object
-            // is marked done.
-            dso.dynv = raw.as_mut_ptr();
-            assert_eq!(base as usize % size_of::<usize>(), 0);
+            assert_eq!(dso.relocated, 0);
+            reloc_all(null_mut(), &mut dso as *mut Dso, true);
+            assert_eq!(dso.relocated, 1);
+            // Second call is a no-op: the guard, not a double relocation.
+            reloc_all(null_mut(), &mut dso as *mut Dso, true);
+            assert_eq!(dso.relocated, 1);
         }
     }
 
