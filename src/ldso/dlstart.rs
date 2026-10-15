@@ -290,7 +290,8 @@ pub unsafe extern "C" fn _dlstart_boot(sp: *const usize, dynv: *const usize) -> 
         }
         let app = core::ptr::addr_of_mut!(super::boot::APP);
         *app = super::boot::app_dso_from_aux(&aux);
-        let entry = super::boot::dynlink_boot(envp_from_sp(sp), &aux, app, super::boot::load_library);
+        let entry =
+            super::boot::dynlink_boot(envp_from_sp(sp), &aux, app, super::boot::load_library);
         // Pass 2 (musl's `ldso.relocated = 0` + the step-12 pass,
         // `dynlink.c:1763,2032-2033`): re-resolve our GOT against the
         // full namespace, searching from `head`. By now the program ran
