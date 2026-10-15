@@ -85,14 +85,19 @@ pub static mut __libc: Libc = Libc {
 pub static mut __hwcap: usize = 0;
 
 /// musl `char *__progname/__progname_full` (`src/internal/libc.c:6`),
-/// initialized from `argv[0]` in [`__init_libc`].
+/// initialized from `argv[0]` in [`__init_libc`]. Initialized to the
+/// empty string rather than null: a zero-initialized `static mut` is
+/// emitted as a COMMON symbol, and the `.set` alias below requires a
+/// strong definition ("changed binding to STB_GLOBAL" otherwise). musl
+/// holds NULL until `__init_libc`; nothing can observe ours before
+/// `__init_libc` overwrites it on the same path.
 #[cfg(not(test))]
 #[no_mangle]
-pub static mut __progname: *mut c_char = core::ptr::null_mut();
+pub static mut __progname: *mut c_char = c"".as_ptr() as *mut c_char;
 /// musl `char *__progname_full` (`src/internal/libc.c:6`): `argv[0]` whole.
 #[cfg(not(test))]
 #[no_mangle]
-pub static mut __progname_full: *mut c_char = core::ptr::null_mut();
+pub static mut __progname_full: *mut c_char = c"".as_ptr() as *mut c_char;
 
 // musl `src/internal/libc.c:8-9`: both pointers are also visible under
 // their `program_invocation_*` names. `weak_alias!` is plain `.weak` +
