@@ -544,10 +544,10 @@ mod tests {
             let mut b = zeroed_dso();
             let strs = *b"libMissing.so\0libB.so\0\0";
             let empty = [0u8; 8];
-            let mut dyn = [DT_NEEDED, 0usize, DT_NEEDED, 13usize, DT_NULL, 0];
+            let mut needs = [DT_NEEDED, 0usize, DT_NEEDED, 13usize, DT_NULL, 0];
             app.name = strs.as_ptr() as *mut c_char;
             app.strings = strs.as_mut_ptr() as *mut c_char;
-            app.dynv = dyn.as_mut_ptr();
+            app.dynv = needs.as_mut_ptr();
             b.name = empty.as_mut_ptr() as *mut c_char;
             b.strings = empty.as_mut_ptr() as *mut c_char;
             let mut none = [DT_NULL, 0usize];
