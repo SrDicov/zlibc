@@ -235,7 +235,7 @@ pub unsafe fn do_dlsym(handle: *mut c_void, name: *const c_char, ra: usize) -> *
             v[1] = ((*def_sym).st_value as usize).wrapping_sub(0);
             return super::reloc::__tls_get_addr(v.as_ptr());
         }
-        ((*def_dso).base as *mut u8).wrapping_add((*def_sym).st_value as usize) as *mut c_void
+        ((*def_dso).base).wrapping_add((*def_sym).st_value as usize) as *mut c_void
     }
 }
 
@@ -293,6 +293,11 @@ pub extern "C" fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void
 
 /// musl hidden `__dlsym` (`dynlink.h:108`): `handle`, `name`, and the
 /// return address musl's trampoline fetched.
+///
+/// # Safety
+///
+/// Same contract as [`dlsym`]: `name` NUL-terminated, `handle` a loader
+/// handle, null, or `RTLD_NEXT`.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
 pub unsafe extern "C" fn __dlsym(
@@ -312,7 +317,7 @@ mod tests {
     #[test]
     fn dlerror_returns_once() {
         let _guard = lock();
-        unsafe {
+        {
             assert!(dlerror().is_null(), "no pending error to start");
             set_error(b"boom");
             let first = dlerror();
@@ -334,7 +339,7 @@ mod tests {
     #[test]
     fn dlerror_buffer_has_the_pointer_floor() {
         let _guard = lock();
-        unsafe {
+        {
             set_error(b"x");
             let p = dlerror();
             assert!(!p.is_null());
@@ -351,7 +356,7 @@ mod tests {
     #[test]
     fn dlclose_is_a_no_op_for_live_handles() {
         let _guard = lock();
-        unsafe {
+        {
             linkmap::reset_namespace();
             let mut d: Dso = core::mem::zeroed();
             linkmap::set_namespace(&mut d as *mut Dso);
@@ -369,7 +374,7 @@ mod tests {
     #[test]
     fn dlsym_on_empty_namespace_misses_cleanly() {
         let _guard = lock();
-        unsafe {
+        {
             linkmap::reset_namespace();
             assert!(dlsym(RTLD_DEFAULT, c"nope".as_ptr()).is_null());
             assert!(!dlerror().is_null());
@@ -382,7 +387,7 @@ mod tests {
     #[test]
     fn dlsym_rejects_unknown_handle() {
         let _guard = lock();
-        unsafe {
+        {
             linkmap::reset_namespace();
             let mut d: Dso = core::mem::zeroed();
             linkmap::set_namespace(&mut d as *mut Dso);
