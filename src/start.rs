@@ -117,13 +117,14 @@ crate::weak_alias!(program_invocation_name, __progname_full);
 /// is not a value the compiler will emit into `.data`, and the `.set`
 /// aliases below need a strong definition. musl holds NULL until
 /// `__init_libc`; the observable difference ends there.
-static EMPTY_ENV: [*mut c_char; 1] = [core::ptr::null_mut()];
+static mut EMPTY_ENV: [*mut c_char; 1] = [core::ptr::null_mut()];
 
 /// musl `char **__environ` (`src/env/__environ.c:3`), installed from
 /// `envp` in [`__init_libc`] (musl `__libc_start_main.c:26`).
 #[cfg(not(test))]
 #[no_mangle]
-pub static mut __environ: *mut *mut c_char = EMPTY_ENV.as_ptr() as *mut *mut c_char;
+pub static mut __environ: *mut *mut c_char =
+    core::ptr::addr_of_mut!(EMPTY_ENV).cast::<*mut c_char>();
 
 // musl `src/env/__environ.c:4-6`: three weak names, one variable.
 #[cfg(not(test))]
@@ -491,7 +492,7 @@ mod tests {
     /// stays out of tests, like the rest of this module's runtime half.)
     #[test]
     fn empty_env_is_null_terminated() {
-        assert!(super::EMPTY_ENV[0].is_null());
-        assert_eq!(super::EMPTY_ENV.len(), 1);
+        let slot = unsafe { core::ptr::addr_of!(super::EMPTY_ENV).read()[0] };
+        assert!(slot.is_null());
     }
 }
