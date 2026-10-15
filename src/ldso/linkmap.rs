@@ -172,13 +172,13 @@ pub unsafe fn load_direct_deps(p: *mut Dso, load: LoadFn) -> bool {
         // runtime failure path; everything else, a plain library with
         // zero deps included, allocates one terminator slot.
         if is_head && cnt < 2 {
-            (*p).deps = BUILTIN_DEPS.as_ptr();
+            (*p).deps = BUILTIN_DEPS.as_ptr().cast_mut();
         } else {
             let slots = crate::malloc::calloc(cnt + 1, size_of::<*mut Dso>());
             if slots.is_null() {
                 // musl prints and (at startup) keeps going into a NULL
                 // `deps`; we stop before that and report the failure.
-                (*p).deps = NO_DEPS.as_ptr();
+                (*p).deps = NO_DEPS.as_ptr().cast_mut();
                 return false;
             }
             (*p).deps = slots as *mut *mut Dso;
@@ -348,7 +348,7 @@ pub unsafe fn find_by_inode(dev: u64, ino: u64) -> *mut Dso {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::ptr::null_mut;
+    use core::ptr::{addr_of, addr_of_mut, null_mut};
     use core::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::ldso::dso::Dso;
