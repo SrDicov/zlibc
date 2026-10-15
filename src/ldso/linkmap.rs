@@ -349,12 +349,10 @@ pub unsafe fn push_lazy(p: *mut Dso) {
 /// # Safety
 ///
 /// Only during loader single ownership.
-pub unsafe fn take_lazy_head() -> *mut Dso {
-    unsafe {
-        let h = LAZY_HEAD.load(Ordering::Acquire);
-        LAZY_HEAD.store(null_mut(), Ordering::Release);
-        h
-    }
+pub fn take_lazy_head() -> *mut Dso {
+    let h = LAZY_HEAD.load(Ordering::Acquire);
+    LAZY_HEAD.store(null_mut(), Ordering::Release);
+    h
 }
 
 /// Already-loaded object with this `(dev, ino)`, skipping the main

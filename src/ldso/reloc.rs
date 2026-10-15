@@ -39,10 +39,10 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use super::dso::{gnu_hash, sysv_hash};
 
-use super::dso::Dso;
+use super::dso::{decode_vec, search_vec, Dso};
 use super::{
-    decode_vec, search_vec, DF_1_NOW, DF_BIND_NOW, DT_BIND_NOW, DT_FLAGS, DT_FLAGS_1, DT_PLTRELSZ,
-    DT_RELASZ, DT_RELSZ,
+    DF_1_NOW, DF_BIND_NOW, DT_BIND_NOW, DT_FLAGS, DT_FLAGS_1, DT_PLTRELSZ, DT_RELASZ, DT_RELSZ,
+    DYN_CNT,
 };
 
 use super::Elf64Sym;
