@@ -80,6 +80,11 @@ pub fn reset_namespace() {
     set_namespace(null_mut());
 }
 
+/// DIAG (transient): slots the array was sized for.
+fn fill_slot(filled: &mut usize) -> usize {
+    *filled
+}
+
 /// Append `p` at the namespace tail (musl `dynlink.c:1252-1254`): the
 /// load order *is* the list order, and the BFS cursor relies on it.
 ///
@@ -211,6 +216,13 @@ pub unsafe fn load_direct_deps(p: *mut Dso, load: LoadFn) -> bool {
                     // musl: print, `continue` — the array keeps a hole
                     // and the namespace carries on (`dynlink.c:1288`).
                     ok = false;
+                    // DIAG (transient): which name, and did it exist?
+                    crate::ldso::reloc::diag_missing(
+                        name,
+                        off,
+                        (*p).dynv.add(i).read(),
+                        filled,
+                    );
                     i += 2;
                     continue;
                 }

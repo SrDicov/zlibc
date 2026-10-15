@@ -193,6 +193,62 @@ pub(crate) unsafe fn diag_calloc_null(slots: usize, each: usize, is_head: bool, 
     }
 }
 
+/// DIAG (transient): report a `DT_NEEDED` that produced no object.
+///
+/// # Safety
+///
+/// `name` must be a readable NUL-terminated string.
+pub(crate) unsafe fn diag_missing(name: *const c_char, off: usize, tag: usize, filled: usize) {
+    unsafe {
+        let mut buf = [0u8; 128];
+        let mut n = 0usize;
+        let msg = b"DIAG needed '";
+        for byte in msg {
+            buf[n] = *byte;
+            n += 1;
+        }
+        let mut k = 0usize;
+        while *name.add(k) != 0 && n < buf.len() - 2 {
+            buf[n] = *name.add(k) as u8;
+            n += 1;
+            k += 1;
+        }
+        buf[n] = b'\'';
+        n += 1;
+        let tail = b"' off=";
+        for byte in tail {
+            if n < buf.len() {
+                buf[n] = *byte;
+                n += 1;
+            }
+        }
+        let mut v = off;
+        let mut digits = [0u8; 20];
+        let mut d = 0usize;
+        loop {
+            digits[d] = b'0' + (v % 10) as u8;
+            d += 1;
+            v /= 10;
+            if v == 0 {
+                break;
+            }
+        }
+        while d > 0 {
+            d -= 1;
+            if n < buf.len() {
+                buf[n] = digits[d];
+                n += 1;
+            }
+        }
+        if n < buf.len() {
+            buf[n] = b'\n';
+            n += 1;
+        }
+        let _ = (tag, filled);
+        write_all(2, buf.as_ptr(), n);
+    }
+}
+
 pub(crate) unsafe fn c_strlen(s: *const c_char) -> usize {
     unsafe {
         let mut n = 0usize;
