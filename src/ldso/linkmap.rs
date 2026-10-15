@@ -80,11 +80,6 @@ pub fn reset_namespace() {
     set_namespace(null_mut());
 }
 
-/// DIAG (transient): slots the array was sized for.
-fn fill_slot(filled: &mut usize) -> usize {
-    *filled
-}
-
 /// Append `p` at the namespace tail (musl `dynlink.c:1252-1254`): the
 /// load order *is* the list order, and the BFS cursor relies on it.
 ///
