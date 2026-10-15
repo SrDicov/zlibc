@@ -20,7 +20,8 @@
 //! pieces here are what `dlopen` itself calls.
 
 use core::ffi::{c_char, c_int, c_void};
-use core::ptr::{null, null_mut};
+use core::ptr::null_mut;
+use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 use super::dso::Dso;
 use super::linkmap;
@@ -44,23 +45,20 @@ pub const RTLD_NEXT: *mut c_void = usize::MAX as *mut c_void;
 /// musl `RTLD_DEFAULT` (`include/dlfcn.h:14`): search the global scope.
 pub const RTLD_DEFAULT: *mut c_void = null_mut();
 
-/// Per-thread error buffer (musl `struct pthread`: `dlerror_flag` bit +
-/// `dlerror_buf`, `pthread_impl.h:41,59`). Ours is keyed by the same
-/// magic-guarded thread pointer `errno` uses, so a foreign thread falls
-/// back to one shared buffer rather than touching a glibc TCB.
-struct ErrSlot {
-    flag: bool,
-    buf: *mut c_char,
-}
+/// Per-thread error buffer (musl keeps `dlerror_flag` and `dlerror_buf`
+/// in `struct pthread`, `pthread_impl.h:41,59`). Ours is one shared pair
+/// of atomics: the slot lives in the TCB we do not own yet, and a
+/// process-global buffer is the conservative reading — it can report a
+/// stale message to the wrong thread, never a wrong pointer.
+static ERR_FLAG: AtomicBool = AtomicBool::new(false);
+static ERR_BUF: AtomicPtr<c_char> = AtomicPtr::new(null_mut());
 
 /// Sentinel musl parks when the allocation fails
 /// (`dlerror.c:65-70`), reported as a fixed message by `dlerror`.
 const OOM_MSG: &[u8] = b"Dynamic linker failed to allocate memory for error message\0";
 
-static ERR_SLOT: ErrSlot = ErrSlot {
-    flag: false,
-    buf: null_mut(),
-};
+/// `usize::MAX` as a sentinel `*mut c_char`: musl uses `(void *)-1`.
+const ERR_OOM: usize = usize::MAX;
 
 /// musl `dlerror` (`src/ldso/dlerror.c:13-23`): return the pending
 /// message once and clear the flag. Does **not** free the buffer —
@@ -69,14 +67,14 @@ static ERR_SLOT: ErrSlot = ErrSlot {
 #[no_mangle]
 pub extern "C" fn dlerror() -> *mut c_char {
     unsafe {
-        if !ERR_SLOT.flag {
+        if !ERR_FLAG.swap(false, Ordering::AcqRel) {
             return null_mut();
         }
-        ERR_SLOT.flag = false;
-        if ERR_SLOT.buf as usize == usize::MAX {
+        let buf = ERR_BUF.load(Ordering::Acquire);
+        if buf as usize == ERR_OOM {
             return OOM_MSG.as_ptr() as *mut c_char;
         }
-        ERR_SLOT.buf
+        buf
     }
 }
 
@@ -96,14 +94,14 @@ pub unsafe fn set_error(msg: &[u8]) {
         };
         let buf = crate::malloc::malloc(len + 1) as *mut u8;
         if buf.is_null() {
-            ERR_SLOT.buf = usize::MAX as *mut c_char;
-            ERR_SLOT.flag = true;
+            ERR_BUF.store(ERR_OOM as *mut c_char, Ordering::Release);
+            ERR_FLAG.store(true, Ordering::Release);
             return;
         }
         crate::mem::memcpy(buf as *mut c_void, msg.as_ptr() as *const c_void, msg.len());
         *buf.add(msg.len()) = 0;
-        ERR_SLOT.buf = buf as *mut c_char;
-        ERR_SLOT.flag = true;
+        ERR_BUF.store(buf as *mut c_char, Ordering::Release);
+        ERR_FLAG.store(true, Ordering::Release);
     }
 }
 
@@ -269,8 +267,8 @@ unsafe fn find_sym_deps(
 ///
 /// ```asm
 /// dlsym:
-/// 	mov (%rsp),%rdx
-/// 	jmp __dlsym
+///     mov (%rsp),%rdx
+///     jmp __dlsym
 /// ```
 ///
 /// Two instructions. The third argument musl's hidden `__dlsym` takes is
