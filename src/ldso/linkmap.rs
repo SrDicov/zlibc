@@ -150,7 +150,7 @@ pub unsafe fn load_direct_deps(p: *mut Dso, load: LoadFn) -> bool {
         if !(*p).deps.is_null() {
             return true;
         }
-        let is_head = core::ptr::eq(*p, addr_of!(HEAD).read());
+        let is_head = core::ptr::eq(p, addr_of!(HEAD).read());
         let mut cnt = 0usize;
         let needed = count_needed(p);
         cnt += needed;
@@ -442,7 +442,7 @@ mod tests {
             let mut empty = [0u8; 8];
             let mut app_dyn = [DT_NEEDED, 0usize, DT_NEEDED, 6usize, DT_NULL, 0];
             let mut one_need = [DT_NEEDED, 0usize, DT_NULL, 0];
-            let none = [DT_NULL, 0usize];
+            let mut none = [DT_NULL, 0usize];
 
             app.name = app_str.as_ptr() as *mut c_char;
             app.strings = app_str.as_mut_ptr() as *mut c_char;
@@ -499,7 +499,7 @@ mod tests {
             unregister_all();
             let mut app = zeroed_dso();
             let mut b = zeroed_dso();
-            let app_str = *b"libB.so\0\0\0\0\0";
+            let mut app_str = *b"libB.so\0\0\0\0\0";
             let mut empty = [0u8; 8];
             let mut app_dyn = [DT_NEEDED, 0usize, DT_NULL, 0];
             app.name = app_str.as_ptr() as *mut c_char;
