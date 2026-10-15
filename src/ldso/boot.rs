@@ -495,15 +495,7 @@ mod tests {
         ] {
             assert!(unsafe { is_self(c_str(yes).as_ptr()) }, "{yes} is us");
         }
-        for no in [
-            "libfoo.so",
-            "libz.so",
-            "lib",
-            "li",
-            "l",
-            "",
-            "libc",
-        ] {
+        for no in ["libfoo.so", "libz.so", "lib", "li", "l", "", "libc"] {
             assert!(!unsafe { is_self(c_str(no).as_ptr()) }, "{no} is not us");
         }
     }
