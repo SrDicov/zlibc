@@ -603,6 +603,7 @@ pub unsafe fn do_relocs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::eprintln;
 
     /// `r_info` word: musl `ELF64_R_INFO` (include/elf.h:573).
     fn info(sym: usize, ty: u32) -> usize {

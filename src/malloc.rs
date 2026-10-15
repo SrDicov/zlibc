@@ -560,6 +560,7 @@ pub unsafe extern "C" fn memalign(alignment: usize, size: usize) -> *mut c_void 
 mod tests {
     use super::{aligned_alloc, calloc, free, malloc, memalign, posix_memalign, realloc, EINVAL};
     use core::ptr::null_mut;
+    use std::eprintln;
 
     unsafe fn sum(p: *mut u8, n: usize) -> usize {
         unsafe {
