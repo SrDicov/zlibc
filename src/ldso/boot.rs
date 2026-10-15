@@ -27,7 +27,7 @@ use super::dso::{decode_vec, Dso};
 use super::linkmap::{self, LoadFn};
 use super::reloc::do_relocs;
 use super::{
-    AT_ENTRY, AT_PHNUM, AT_PHDR, AT_PHENT, AUX_CNT, DT_JMPREL, DT_NULL, DT_PLTREL, DT_PLTRELSZ,
+    AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM, AUX_CNT, DT_JMPREL, DT_NULL, DT_PLTREL, DT_PLTRELSZ,
     DT_REL, DT_RELA, DT_RELASZ, DT_RELR, DT_RELRSZ, DT_RELSZ, DYN_CNT, PT_DYNAMIC, PT_INTERP,
     PT_TLS,
 };
@@ -91,8 +91,7 @@ pub unsafe fn reloc_all(head: *mut Dso, dso: *mut Dso, skip_relative: bool) {
                     let mut bits = *p >> 1;
                     while bits != 0 {
                         if bits & 1 == 1 && !skip_relative {
-                            let slot = base
-                                .wrapping_add((relr_base + 1) * size_of::<usize>());
+                            let slot = base.wrapping_add((relr_base + 1) * size_of::<usize>());
                             *(slot as *mut usize) = base.wrapping_add(*(slot as *const usize));
                         }
                         relr_base = relr_base.wrapping_add(usize::BITS as usize);
