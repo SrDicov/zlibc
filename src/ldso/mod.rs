@@ -111,6 +111,31 @@ pub const PF_R: u32 = 1 << 2;
 /// musl `DT_*` tags read by `decode_dyn` (musl `include/elf.h:739-831`).
 #[cfg(target_arch = "x86_64")]
 pub const DT_NULL: usize = 0;
+/// musl `DT_NEEDED` (musl `include/elf.h:740`): strtab offset of a
+/// dependency name; the walk that builds the link map reads it.
+#[cfg(target_arch = "x86_64")]
+pub const DT_NEEDED: usize = 1;
+/// musl `DT_STRSZ` (musl `include/elf.h:750`).
+#[cfg(target_arch = "x86_64")]
+pub const DT_STRSZ: usize = 10;
+/// musl `DT_SYMENT` (musl `include/elf.h:751`): size the linker
+/// recorded for one symbol entry.
+#[cfg(target_arch = "x86_64")]
+pub const DT_SYMENT: usize = 11;
+/// musl `DT_SONAME` (musl `include/elf.h:753`): strtab offset of the
+/// object's own name, used to deduplicate already-loaded objects.
+#[cfg(target_arch = "x86_64")]
+pub const DT_SONAME: usize = 14;
+/// musl `DT_TEXTREL` (musl `include/elf.h:761`).
+#[cfg(target_arch = "x86_64")]
+pub const DT_TEXTREL: usize = 22;
+/// musl `DT_FLAGS` (musl `include/elf.h:769`).
+#[cfg(target_arch = "x86_64")]
+pub const DT_FLAGS: usize = 30;
+/// musl `DT_RELACOUNT` (musl `include/elf.h:821`): out-of-range tag
+/// marking how many leading `DT_RELA` entries are `RELATIVE`.
+#[cfg(target_arch = "x86_64")]
+pub const DT_RELACOUNT: usize = 0x6ffffff9;
 /// musl `DT_PLTGOT` (musl `include/elf.h:743`).
 #[cfg(target_arch = "x86_64")]
 pub const DT_PLTGOT: usize = 3;
