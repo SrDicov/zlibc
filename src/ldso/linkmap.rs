@@ -179,13 +179,7 @@ pub unsafe fn load_direct_deps(p: *mut Dso, load: LoadFn) -> bool {
         } else {
             let slots = crate::malloc::calloc(cnt + 1, size_of::<*mut Dso>());
             if slots.is_null() {
-                eprintln!(
-                    "DIAG calloc({} , {}) returned null; is_head={} cnt={}",
-                    cnt + 1,
-                    size_of::<*mut Dso>(),
-                    is_head,
-                    cnt
-                );
+                crate::ldso::reloc::diag_calloc_null(cnt + 1, size_of::<*mut Dso>(), is_head, cnt);
                 // musl prints and (at startup) keeps going into a NULL
                 // `deps`; we stop before that and report the failure.
                 (*p).deps = addr_of_mut!(NO_DEPS).cast::<*mut Dso>();
@@ -360,7 +354,6 @@ mod tests {
     use super::*;
     use core::ptr::{addr_of, addr_of_mut, null_mut};
     use core::sync::atomic::{AtomicUsize, Ordering};
-    use std::eprintln;
 
     use crate::sync::{pthread_mutex_lock, pthread_mutex_unlock, MutexT};
 

@@ -141,6 +141,58 @@ pub(crate) unsafe fn streq(a: *const c_char, b: *const c_char) -> bool {
 /// # Safety
 ///
 /// `s` must address a valid NUL-terminated string.
+/// DIAG (transient): report a null dep-array allocation. Numbers only,
+/// so no formatting machinery is needed in the loader's failure path.
+///
+/// # Safety
+///
+/// Always safe; kept `unsafe` to match the module's other helpers.
+pub(crate) unsafe fn diag_calloc_null(slots: usize, each: usize, is_head: bool, cnt: usize) {
+    unsafe {
+        let mut buf = [0u8; 96];
+        let msg = b"DIAG dep calloc failed slots=";
+        let mut n = 0usize;
+        let mut put = |src: &[u8], buf: &mut [u8], n: &mut usize| {
+            for byte in src {
+                if *n < buf.len() {
+                    buf[*n] = *byte;
+                    *n += 1;
+                }
+            }
+        };
+        put(msg, &mut buf, &mut n);
+        let mut num = |v: usize, buf: &mut [u8], n: &mut usize| {
+            let mut tmp = [0u8; 20];
+            let mut k = 0usize;
+            let mut v = v;
+            loop {
+                tmp[k] = b'0' + (v % 10) as u8;
+                k += 1;
+                v /= 10;
+                if v == 0 {
+                    break;
+                }
+            }
+            while k > 0 {
+                k -= 1;
+                if *n < buf.len() {
+                    buf[*n] = tmp[k];
+                    *n += 1;
+                }
+            }
+        };
+        num(slots, &mut buf, &mut n);
+        put(b" each=", &mut buf, &mut n);
+        num(each, &mut buf, &mut n);
+        put(b" is_head=", &mut buf, &mut n);
+        num(usize::from(is_head), &mut buf, &mut n);
+        put(b" cnt=", &mut buf, &mut n);
+        num(cnt, &mut buf, &mut n);
+        put(b"\n", &mut buf, &mut n);
+        write_all(2, buf.as_ptr(), n);
+    }
+}
+
 pub(crate) unsafe fn c_strlen(s: *const c_char) -> usize {
     unsafe {
         let mut n = 0usize;
