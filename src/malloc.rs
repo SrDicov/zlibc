@@ -350,23 +350,22 @@ fn set_err(e: c_int) {
 
 /// Shared engine for every entry point (lock inside): `size` payload
 /// bytes at `alignment` (power of two, ≥ 16), one arena refill on miss.
-/// musl's oversize gate (`SIZE_MAX/2`, `src/malloc/lite_malloc.c`).
+/// Why every allocator entry point below is `#[inline(never)]`.
 ///
-/// Out of line on purpose. Inlined and constant-folded, LLVM's
-/// range reasoning about pointer-sized sizes lets `malloc(SIZE_MAX)`
-/// return non-null at `-O2`: it assumes the argument is a valid object
-/// size, concludes the gate cannot fire, and drops it. One opaque call
-/// keeps the decision where the value is unknown — verified by
-/// `oversize_is_opaque` plus the release-codegen CI step, because this
-/// failure is invisible at `-O0`.
-#[inline(never)]
-fn oversize(size: usize) -> bool {
-    size > usize::MAX / 2
-}
+/// musl gets this for free: `malloc`, `calloc`, `realloc`, `free` and
+/// `memalign` are separate translation units, so a caller's `-O2` never
+/// rewrites their bodies. Rust has one CGU per module, and at `-O2`
+/// LLVM inlined `malloc` into the caller — where it folded the oversize
+/// gate on a constant `SIZE_MAX` and returned a pointer anyway (release
+/// CI caught exactly that: `malloc(usize::MAX)` non-NULL, and null the
+/// moment an unrelated statement followed it). The allocator entry
+/// points are a public ABI boundary: keep them out of callers' reach,
+/// same shape as musl.
 
 unsafe fn aligned_body(alignment: usize, size: usize) -> *mut c_void {
     unsafe {
-        if oversize(size) {
+        // musl oversize gate (`SIZE_MAX/2`, lite_malloc.c).
+        if size > usize::MAX / 2 {
             set_oom();
             return null_mut();
         }
@@ -399,6 +398,7 @@ unsafe fn aligned_body(alignment: usize, size: usize) -> *mut c_void {
 /// [`free`] runs on it. Never panics; safe to call from any thread.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
+#[inline(never)]
 pub unsafe extern "C" fn malloc(n: usize) -> *mut c_void {
     unsafe { aligned_body(16, n) }
 }
@@ -412,6 +412,7 @@ pub unsafe extern "C" fn malloc(n: usize) -> *mut c_void {
 /// foreign pointers abort the process (musl `mallocng` fails the same
 /// way); the heap stays consistent for everyone else.
 #[no_mangle]
+#[inline(never)]
 pub unsafe extern "C" fn free(p: *mut c_void) {
     if p.is_null() {
         return;
@@ -430,6 +431,7 @@ pub unsafe extern "C" fn free(p: *mut c_void) {
 /// Same validity contract as [`malloc`].
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
+#[inline(never)]
 pub unsafe extern "C" fn calloc(m: usize, n: usize) -> *mut c_void {
     unsafe {
         if m != 0 && n > usize::MAX / m {
@@ -453,12 +455,13 @@ pub unsafe extern "C" fn calloc(m: usize, n: usize) -> *mut c_void {
 /// result differs from it.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
+#[inline(never)]
 pub unsafe extern "C" fn realloc(p: *mut c_void, n: usize) -> *mut c_void {
     unsafe {
         if p.is_null() {
             return malloc(n);
         }
-        if oversize(n) {
+        if n > usize::MAX / 2 {
             set_oom();
             return null_mut();
         }
@@ -498,6 +501,7 @@ pub unsafe extern "C" fn realloc(p: *mut c_void, n: usize) -> *mut c_void {
 /// Same validity contract as [`malloc`], plus `p % alignment == 0`.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
+#[inline(never)]
 pub unsafe extern "C" fn aligned_alloc(alignment: usize, size: usize) -> *mut c_void {
     unsafe {
         if alignment == 0 || alignment & (alignment - 1) != 0 || !size.is_multiple_of(alignment) {
@@ -516,6 +520,7 @@ pub unsafe extern "C" fn aligned_alloc(alignment: usize, size: usize) -> *mut c_
 /// `memptr` must be writable; on success it holds a live aligned object.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
+#[inline(never)]
 pub unsafe extern "C" fn posix_memalign(
     memptr: *mut *mut c_void,
     alignment: usize,
@@ -547,15 +552,9 @@ pub unsafe extern "C" fn posix_memalign(
 /// Same validity contract as [`aligned_alloc`].
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
+#[inline(never)]
 pub unsafe extern "C" fn memalign(alignment: usize, size: usize) -> *mut c_void {
     unsafe {
-        // Impossible ceilings wrap to 0; the opaque gate rejects them
-        // before the pow2 rounding below can hand `aligned_body` an
-        // under-aligned request.
-        if oversize(alignment) {
-            set_oom();
-            return null_mut();
-        }
         // Bit-trick pow2 ceiling (no version-sensitive helpers). A wrapped
         // ceiling (absurd input) would silently under-align SIMD/page
         // tricks downstream: fail clean instead.
@@ -579,7 +578,7 @@ pub unsafe extern "C" fn memalign(alignment: usize, size: usize) -> *mut c_void 
 #[cfg(test)]
 mod tests {
     use super::{
-        aligned_alloc, calloc, free, malloc, memalign, oversize, posix_memalign, realloc, EINVAL,
+        aligned_alloc, calloc, free, malloc, memalign, posix_memalign, realloc, EINVAL,
     };
     use core::ptr::null_mut;
 
@@ -611,17 +610,6 @@ mod tests {
             assert!(!b.is_null());
             free(b as *mut core::ffi::c_void);
         }
-    }
-
-    /// Pins the gate the entry points lean on, so a future inlining of
-    /// [`oversize`] regresses here instead of showing up as a mysterious
-    /// non-NULL from `malloc(usize::MAX)` at `-O2`.
-    #[test]
-    fn oversize_rejects_impossible_sizes() {
-        assert!(oversize(usize::MAX));
-        assert!(oversize(usize::MAX / 2 + 1));
-        assert!(!oversize(usize::MAX / 2));
-        assert!(!oversize(64));
     }
 
     #[test]
