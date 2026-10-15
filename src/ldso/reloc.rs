@@ -247,11 +247,15 @@ pub extern "C" fn __tlsdesc_dynamic() -> isize {
 /// dynamic descriptor's second word. `args` is exactly the
 /// `{tls_id, dtpoff}` pair the resolver reads; `next` threads the
 /// records so `dlopen` failure can free them.
+///
+/// A distinct type from [`crate::ldso::dso::TdIndex`] on purpose: that
+/// one is the opaque `Dso::td_index` slot, and `Dso` must keep musl's
+/// size. The record itself is ours to shape.
 #[cfg(target_arch = "x86_64")]
 #[repr(C)]
-pub struct TdIndex {
+pub struct TdIndexRecord {
     pub args: [usize; 2],
-    pub next: *mut TdIndex,
+    pub next: *mut TdIndexRecord,
 }
 
 /// musl `__tls_get_addr` (`src/thread/__tls_get_addr.c:3-7`):
@@ -267,7 +271,7 @@ pub struct TdIndex {
 pub unsafe extern "C" fn __tls_get_addr(v: *const usize) -> *mut core::ffi::c_void {
     unsafe {
         let tp = crate::thread::tls::get_tp();
-        let dtv = *tp.cast::<*const *mut usize>().add(1) as *const *mut usize;
+        let dtv = (tp as *const *mut *mut usize).add(1).read();
         (dtv.add(*v).read() as usize).wrapping_add(*v.add(1)) as *mut core::ffi::c_void
     }
 }
@@ -659,7 +663,8 @@ pub unsafe fn do_relocs(
                         // `{tls_id, dtpoff}` pair through a `td_index`
                         // threaded on the owning dso so `dlopen` failure
                         // can free it.
-                        let new = crate::malloc::malloc(size_of::<TdIndex>()) as *mut TdIndex;
+                        let new =
+                            crate::malloc::malloc(size_of::<TdIndexRecord>()) as *mut TdIndexRecord;
                         if new.is_null() {
                             fatal((*dso).name, name, b"out of memory for td_index");
                         }
@@ -667,8 +672,8 @@ pub unsafe fn do_relocs(
                             (*def_dso).tls_id,
                             tls_val.wrapping_sub((*def_dso).tls.offset).wrapping_add(a),
                         ];
-                        (*new).next = (*def_dso).td_index;
-                        (*def_dso).td_index = new;
+                        (*new).next = (*def_dso).td_index as *mut TdIndexRecord;
+                        (*def_dso).td_index = new as *mut crate::ldso::dso::TdIndex;
                         *addr.add(0) = __tlsdesc_dynamic as *const () as usize;
                         *addr.add(1) = new as usize;
                     } else {
@@ -948,7 +953,7 @@ mod tests {
                 unsafe { *at(base, 0x08) },
                 __tlsdesc_dynamic as *const () as usize
             );
-            let idx = unsafe { *at(base, 0x10) } as *mut TdIndex;
+            let idx = unsafe { *at(base, 0x10) } as *mut TdIndexRecord;
             assert!(!idx.is_null());
             // args[0] is the module id, args[1] the DTPOFF: symbol value 0x10
             // minus the module offset 0x40 plus the addend 6.
@@ -958,7 +963,7 @@ mod tests {
                 0x10usize.wrapping_sub(0x40).wrapping_add(6)
             );
             // Threaded for `dlopen` rollback.
-            assert_eq!(unsafe { dso.td_index }, idx);
+            assert_eq!(unsafe { dso.td_index as usize }, idx as usize);
             assert!(unsafe { (*idx).next }.is_null());
         }
     }
