@@ -607,7 +607,11 @@ mod tests {
             assert!(o.is_null());
             let o2 = malloc(usize::MAX);
             eprintln!("EDGE malloc(MAX) again = {:p}", o2);
-            assert!(calloc(usize::MAX, 2).is_null(), "calloc = {:p}", calloc(usize::MAX, 2));
+            assert!(
+                calloc(usize::MAX, 2).is_null(),
+                "calloc = {:p}",
+                calloc(usize::MAX, 2)
+            );
             assert!(
                 realloc(null_mut(), usize::MAX).is_null(),
                 "realloc = {:p}",
