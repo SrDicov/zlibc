@@ -220,6 +220,7 @@ extern "C" fn tlsdesc_static() -> isize {
 /// identity assert then compared two distinct addresses (release-only
 /// failure). The contract is "the slot holds the static-TLS resolver",
 /// not "equals this particular cast expression".
+#[inline(never)]
 fn tlsdesc_static_ptr() -> usize {
     tlsdesc_static as *const () as usize
 }
