@@ -260,7 +260,7 @@ unsafe fn is_self(name: *const c_char) -> bool {
 /// the self check (`dynlink.c:1100`).
 #[cfg(target_arch = "x86_64")]
 fn ldso_name() -> *mut c_char {
-    b"libc.so\0".as_ptr() as *mut c_char
+    c"libc.so".as_ptr() as *mut c_char
 }
 
 /// musl `load_library` (`dynlink.c:1057-1260`), minus the search-path
@@ -332,11 +332,10 @@ pub unsafe fn load_library(name: *const c_char, _needed_by: *mut Dso) -> *mut Ds
             return null_mut();
         }
         let p = block as *mut Dso;
-        core::ptr::write_bytes(p, 0, 1);
-        let name_ptr = (block as *mut u8).add(size_of::<Dso>()) as *mut c_char;
+        let name_ptr = (block as *mut u8).add(size_of::<Dso>()).cast::<c_char>();
         crate::mem::memcpy(
-            name_ptr as *mut core::ffi::c_void,
-            name as *const core::ffi::c_void,
+            name_ptr.cast::<core::ffi::c_void>(),
+            name.cast::<core::ffi::c_void>(),
             name_len + 1,
         );
         (*p).name = name_ptr;
@@ -358,8 +357,8 @@ pub unsafe fn load_library(name: *const c_char, _needed_by: *mut Dso) -> *mut Ds
 /// True when `LDSO` already sits in the namespace list.
 #[cfg(target_arch = "x86_64")]
 fn self_is_linked() -> bool {
+    let me = core::ptr::addr_of_mut!(LDSO);
     unsafe {
-        let me = core::ptr::addr_of_mut!(LDSO);
         let mut p = linkmap::head();
         while !p.is_null() {
             if core::ptr::eq(p, me) {
