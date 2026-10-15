@@ -284,21 +284,23 @@ mod tests {
     fn app_dso_reads_phdrs() {
         let _guard = lock();
         unsafe {
-            let mut phdrs = [0u64; 24];
-            // index 2: PT_TLS with p_vaddr 0x1000, memsz 32, filesz 8, align 16
-            phdrs[2] = PT_TLS as u64;
-            phdrs[3] = 4; // flags
-            phdrs[4] = 0x1000; // p_offset
-            phdrs[5] = 0x1000; // p_vaddr
-            phdrs[6] = 0; // p_paddr
-            phdrs[7] = 8; // p_filesz
-            phdrs[8] = 32; // p_memsz
-            phdrs[9] = 16; // p_align
+            // Elf64Phdr is 8 u64 slots: type, flags, offset, vaddr,
+            // paddr, filesz, memsz, align. Put PT_TLS in header 2.
+            let mut phdrs = [0u64; 32];
+            const TLS_PH: usize = 2 * 8;
+            phdrs[TLS_PH] = PT_TLS as u64;
+            phdrs[TLS_PH + 1] = 4; // p_flags
+            phdrs[TLS_PH + 2] = 0x1000; // p_offset
+            phdrs[TLS_PH + 3] = 0x1000; // p_vaddr
+            phdrs[TLS_PH + 4] = 0x1000; // p_paddr
+            phdrs[TLS_PH + 5] = 8; // p_filesz: the initialized part
+            phdrs[TLS_PH + 6] = 32; // p_memsz
+            phdrs[TLS_PH + 7] = 16; // p_align
             let mut aux = [0usize; AUX_CNT];
             aux[AT_PHDR] = phdrs.as_mut_ptr() as usize;
             aux[AT_PHNUM] = 3;
-            aux[AT_PHENT] = 24;
-            aux[crate::ldso::AT_BASE] = 0;
+            aux[AT_PHENT] = 64;
+            aux[super::AT_BASE] = 0;
             let d = app_dso_from_aux(&aux);
             assert_eq!(d.phnum, 3);
             assert_eq!(d.tls.size, 32);
