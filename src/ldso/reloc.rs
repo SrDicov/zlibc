@@ -1082,7 +1082,10 @@ mod tests {
     }
 
     /// Corrupt table sizes fail loud in debug (musl trusts the linker;
-    /// release would wrap `left` and walk OOB instead).
+    /// release would wrap `left` and walk OOB instead). Debug-only: the
+    /// guard is a `debug_assert!`, so in release there is nothing to panic
+    /// and the test would report a false failure.
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic]
     fn rel_size_must_be_stride_multiple() {

@@ -43,6 +43,47 @@ jobs:
       # So does the D5 validation test (threads + malloc + stdio).
       - name: Test thread (serial)
         run: 'timeout 120 cargo test --verbose -- thread:: errno::tests::errno_is_per_thread validation:: --test-threads=1'
+      # Everything above is -O0 codegen. Release is where LLVM first sees
+      # the byte-loops and the inline asm: run the whole suite optimized,
+      # serially, so optimization regressions surface here and not at the
+      # Alpine gate (6E), where nothing can be bisected.
+      - name: Test (release codegen, serial)
+        run: 'timeout 300 cargo test --release -- --test-threads=1'
+
+      - name: Build (x86_64-unknown-linux-musl, release)
+        run: cargo build --release --target x86_64-unknown-linux-musl
+      # A byte-loop in a `#[no_mangle] memcpy` that LLVM turns into a call
+      # to memcpy is an infinite recursion, not a compile error — it would
+      # only ever show as a stack overflow at runtime. LoopIdiomRecognize
+      # aborts on functions named exactly memcpy/memset/memmove, so this is
+      # a guard, not a known bug: prove it on the emitted code instead of
+      # trusting the guard. Fail = fix the loop word-at-a-time (musl's
+      # shape), never `#[no_builtins]`.
+      # The symbol-presence check is load-bearing: a renamed/missing symbol
+      # would make "zero calls" look like a pass, i.e. a gate that can
+      # never fail. Absence is an error, not a green.
+      - name: mem* must not self-call (release codegen)
+        run: |
+          fail=0
+          for s in memcpy memmove memset memcmp; do
+            for f in target/x86_64-unknown-linux-musl/release/deps/libzlibc-*.rlib; do
+              body=$(objdump -d --disassemble="$s" "$f" 2>/dev/null) || true
+              if ! echo "$body" | grep -q "<$s>:"; then
+                echo "::error file=$f::$s absent from release codegen (gate would be vacuous)"
+                fail=1
+                continue
+              fi
+              calls=$(echo "$body" | awk -v sym="<$s>:" '
+                $0 ~ sym {b=1; next}
+                b && /^[[:space:]]*$/ {exit}
+                b && /call/ {print}')
+              if echo "$calls" | grep -qw "$s"; then
+                echo "::error file=$f::$s self-calls in release codegen"
+                fail=1
+              fi
+            done
+          done
+          exit $fail
       # Wave 5 gate packet 1: a real binary on zlibc only (our `_start`,
       # no host libc). The hello crate builds itself (abort + nostdlib);
       # this step asserts the exact bytes and the exit status.
