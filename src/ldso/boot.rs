@@ -27,7 +27,7 @@ use super::dso::{decode_vec, Dso};
 use super::linkmap::{self, LoadFn};
 use super::reloc::do_relocs;
 use super::{
-    AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM, AUX_CNT, DT_JMPREL, DT_NULL, DT_PLTREL, DT_PLTRELSZ,
+    AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM, AUX_CNT, DT_JMPREL, DT_PLTREL, DT_PLTRELSZ,
     DT_REL, DT_RELA, DT_RELASZ, DT_RELR, DT_RELRSZ, DT_RELSZ, DYN_CNT, PT_DYNAMIC, PT_INTERP,
     PT_TLS,
 };
@@ -145,7 +145,7 @@ pub unsafe fn app_dso_from_aux(aux: &[usize; AUX_CNT]) -> Dso {
         d.base = base as *mut u8;
         d.kernel_mapped = 1;
         let mut i = 0usize;
-        while i < phnum as usize {
+        while i < phnum {
             let ph = phdr.wrapping_byte_add(i * phent).cast::<super::Elf64Phdr>();
             if (*ph).p_type == PT_DYNAMIC {
                 d.dynv = d.base.wrapping_add((*ph).p_vaddr as usize) as *mut usize;
