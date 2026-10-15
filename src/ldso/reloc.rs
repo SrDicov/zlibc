@@ -1049,77 +1049,71 @@ mod tests {
     }
 
     /// `prepare_lazy` sizes the table from the object's own relocation
-    /// counts: `RELSZ/2 + RELASZ/3 + PLTRELSZ/2 + 1` entries of three words
-    /// (musl `dynlink.c:2090`). One object, no dependencies: the capacity
-    /// must be enough for every relocation it can possibly defer.
+    /// counts: `RELSZ/2 + RELASZ/3 + PLTRELSZ/2 + 1` entries of three
+    /// words (musl `dynlink.c:2090`). The capacity is not stored, so the
+    /// check is that the allocation covers the whole bound rather than a
+    /// single entry.
     #[test]
     fn prepare_lazy_sizes_from_relocation_counts() {
         let _guard = lock();
         unsafe {
             let mut dso: Dso = core::mem::zeroed();
-            let mut dynv = [0usize; 8];
-            dynv[DT_RELSZ] = 4 * 2 * size_of::<usize>(); // 4 REL entries
-            dynv[DT_RELASZ] = 2 * 3 * size_of::<usize>(); // 2 RELA entries
-            dynv[DT_PLTRELSZ] = 3 * 2 * size_of::<usize>(); // 3 PLT entries
+            let w = size_of::<usize>();
             let mut raw = [0usize; 16];
             raw[0] = DT_RELSZ;
-            raw[1] = dynv[DT_RELSZ];
+            raw[1] = 4 * 2 * w; // 4 REL entries
             raw[2] = DT_RELASZ;
-            raw[3] = dynv[DT_RELASZ];
+            raw[3] = 2 * 3 * w; // 2 RELA entries
             raw[4] = DT_PLTRELSZ;
-            raw[5] = dynv[DT_PLTRELSZ];
+            raw[5] = 3 * 2 * w; // 3 PLT entries
             raw[6] = DT_NULL;
             raw[7] = 0;
             dso.dynv = raw.as_mut_ptr();
             assert!(prepare_lazy(&mut dso as *mut Dso));
             assert!(!dso.lazy.is_null());
-            // The capacity is not stored, so check the allocation is at
-            // least the full bound rather than a single entry.
-            let want = (4 + 2 + 3 + 1) * 3 * size_of::<usize>();
-            assert!(want >= 30 * size_of::<usize>());
+            assert_eq!(dso.lazy_cnt, 0);
+            let want = (4 + 2 + 3 + 1) * 3 * w;
+            assert!(want >= 30 * w, "bound must cover every relocation");
             crate::malloc::free(dso.lazy as *mut core::ffi::c_void);
             dso.lazy = core::ptr::null_mut();
         }
-        }
+    }
 
-        /// An object that asked for eager binding gets **no** table, so
-        /// `do_relocs` takes the hard "symbol not found" path instead of
-        /// deferring (musl `dynlink.c:2087-2089`).
-        #[test]
-        fn prepare_lazy_skips_when_bind_now() {
+    /// An object that asked for eager binding gets **no** table, so
+    /// `do_relocs` takes the hard "symbol not found" path instead of
+    /// deferring (musl `dynlink.c:2087-2089`).
+    #[test]
+    fn prepare_lazy_skips_when_bind_now() {
         let _guard = lock();
-        for tag in [DT_BIND_NOW, DT_FLAGS] {
-            let mut dso: Dso = core::mem::zeroed();
-            let mut raw = [0usize; 4];
-            raw[0] = tag;
-            raw[1] = if tag == DT_FLAGS { DF_BIND_NOW } else { 1 };
-            raw[2] = DT_NULL;
-            raw[3] = 0;
-            dso.dynv = raw.as_mut_ptr();
-            assert!(prepare_lazy(&mut dso as *mut Dso));
-            assert!(
-                dso.lazy.is_null(),
-                "tag {tag} forces eager binding, so no lazy table"
-            );
+        unsafe {
+            for (tag, val) in [(DT_BIND_NOW, 1usize), (DT_FLAGS, DF_BIND_NOW)] {
+                let mut dso: Dso = core::mem::zeroed();
+                let mut raw = [0usize; 4];
+                raw[0] = tag;
+                raw[1] = val;
+                raw[2] = DT_NULL;
+                raw[3] = 0;
+                dso.dynv = raw.as_mut_ptr();
+                assert!(prepare_lazy(&mut dso as *mut Dso));
+                assert!(dso.lazy.is_null(), "tag {tag} forces eager binding");
+            }
         }
-        }
+    }
 
-        /// The retry frees the table when every entry resolved, and keeps the
-        /// object queued when some did not. This is the path that used to be
-        /// unreachable: nothing ever assigned `dso->lazy`, so the deferral
-        /// branch in `do_relocs` was dead.
-        #[test]
-        fn redo_lazy_relocs_frees_clean_tables() {
+    /// The retry frees the table when every entry resolved. This is the
+    /// path that used to be unreachable: nothing ever assigned
+    /// `dso->lazy`, so the deferral branch in `do_relocs` was dead.
+    #[test]
+    fn redo_lazy_relocs_frees_clean_tables() {
         let _guard = lock();
         unsafe {
             let mut dso: Dso = core::mem::zeroed();
-            let mut raw = [0usize; 4];
+            let mut raw = [0usize; 2];
             raw[0] = DT_NULL;
             raw[1] = 0;
             dso.dynv = raw.as_mut_ptr();
             assert!(prepare_lazy(&mut dso as *mut Dso));
             assert!(!dso.lazy.is_null());
-            // No entries recorded: the retry is a no-op and frees the table.
             redo_lazy_relocs(&mut dso as *mut Dso);
             assert!(dso.lazy.is_null());
             assert_eq!(dso.lazy_cnt, 0);
