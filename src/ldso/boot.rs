@@ -20,7 +20,7 @@
 //!    being done (`dynlink.c:2030-2031`);
 //! 6. the entry point is returned and jumped to.
 
-use core::ffi::{c_char, c_int};
+use core::ffi::{c_char, c_int, c_void};
 use core::ptr::null_mut;
 
 use super::dso::{decode_vec, Dso};
