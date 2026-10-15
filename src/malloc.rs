@@ -602,8 +602,16 @@ mod tests {
             // free(NULL) is a no-op.
             free(null_mut());
             // Oversize fails clean, never panics.
-            assert!(malloc(usize::MAX).is_null(), "malloc MAX = {:p}", malloc(usize::MAX));
-            assert!(memalign(usize::MAX, 64).is_null(), "memalign MAX = {:p}", memalign(usize::MAX, 64));
+            assert!(
+                malloc(usize::MAX).is_null(),
+                "malloc MAX = {:p}",
+                malloc(usize::MAX)
+            );
+            assert!(
+                memalign(usize::MAX, 64).is_null(),
+                "memalign MAX = {:p}",
+                memalign(usize::MAX, 64)
+            );
             assert!(calloc(usize::MAX, 2).is_null(), "calloc = {:p}", calloc(usize::MAX, 2));
             assert!(
                 realloc(null_mut(), usize::MAX).is_null(),
