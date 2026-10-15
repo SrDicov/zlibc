@@ -333,7 +333,8 @@ mod tests {
             AT_NULL,
         ];
         let envp = unsafe { super::envp_from_sp(stack.as_ptr()) };
-        assert_eq!(envp as usize, e0.as_ptr() as usize);
+        assert_eq!(envp as usize, stack.as_ptr() as usize + 4 * size_of::<usize>());
+        assert_eq!(unsafe { *envp } as usize, e0.as_ptr() as usize);
         assert_eq!(unsafe { *envp.add(1) } as usize, e1.as_ptr() as usize);
         assert!(unsafe { (*envp.add(2)).is_null() });
     }
