@@ -659,8 +659,7 @@ pub unsafe fn do_relocs(
                         // `{tls_id, dtpoff}` pair through a `td_index`
                         // threaded on the owning dso so `dlopen` failure
                         // can free it.
-                        let new = crate::malloc::malloc(size_of::<TdIndex>())
-                            as *mut TdIndex;
+                        let new = crate::malloc::malloc(size_of::<TdIndex>()) as *mut TdIndex;
                         if new.is_null() {
                             fatal((*dso).name, name, b"out of memory for td_index");
                         }
@@ -674,8 +673,7 @@ pub unsafe fn do_relocs(
                         *addr.add(1) = new as usize;
                     } else {
                         *addr.add(0) = tlsdesc_static_ptr();
-                        *addr.add(1) =
-                            tls_val.wrapping_sub((*def_dso).tls.offset).wrapping_add(a);
+                        *addr.add(1) = tls_val.wrapping_sub((*def_dso).tls.offset).wrapping_add(a);
                     }
                 }
                 _ => {
@@ -908,13 +906,12 @@ mod tests {
         );
     }
 
-    #[test]
     /// A module past `static_tls_cnt` takes the dynamic arm: the slot gets
-/// `__tlsdesc_dynamic` and a `td_index` carrying `{tls_id, dtpoff}`
-/// (musl `dynlink.c:522-535`). This used to be a fatal path, so the
-/// branch had no coverage at all.
-#[test]
-fn tlsdesc_dynamic_stores_index_and_module_id() {
+    /// `__tlsdesc_dynamic` and a `td_index` carrying `{tls_id, dtpoff}`
+    /// (musl `dynlink.c:522-535`). This used to be a fatal path, so the
+    /// branch had no coverage at all.
+    #[test]
+    fn tlsdesc_dynamic_stores_index_and_module_id() {
     unsafe {
         set_static_tls_cnt(1);
         let mut mem = [0u8; 64];
