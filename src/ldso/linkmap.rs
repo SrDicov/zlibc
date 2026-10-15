@@ -517,7 +517,11 @@ mod tests {
             let first = CALLS.load(Ordering::SeqCst);
             assert_eq!(first, 1, "one DT_NEEDED, one load");
             assert!(load_deps(&mut app as *mut Dso, fake_load));
-            assert_eq!(CALLS.load(Ordering::SeqCst), first, "second walk must not reload");
+            assert_eq!(
+                CALLS.load(Ordering::SeqCst),
+                first,
+                "second walk must not reload"
+            );
 
             reset_namespace();
             unregister_all();
