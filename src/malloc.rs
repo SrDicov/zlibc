@@ -350,10 +350,10 @@ fn set_err(e: c_int) {
 
 /// Shared engine for every entry point (lock inside): `size` payload
 /// bytes at `alignment` (power of two, ≥ 16), one arena refill on miss.
-/// Why every allocator entry point below is `#[inline(never)]`.
-///
-/// musl gets this for free: `malloc`, `calloc`, `realloc`, `free` and
-/// `memalign` are separate translation units, so a caller's `-O2` never
+// Why every allocator entry point below is `#[inline(never)]`.
+//
+// musl gets this for free: `malloc`, `calloc`, `realloc`, `free` and
+// `memalign` are separate translation units, so a caller's `-O2` never
 /// rewrites their bodies. Rust has one CGU per module, and at `-O2`
 /// LLVM inlined `malloc` into the caller — where it folded the oversize
 /// gate on a constant `SIZE_MAX` and returned a pointer anyway (release
