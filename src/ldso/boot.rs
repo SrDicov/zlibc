@@ -799,7 +799,11 @@ mod tests {
             );
             assert!(!lib.rpath.is_null());
             let got = core::slice::from_raw_parts(lib.rpath as *const u8, 17);
-            assert_eq!(got, b"/x/y/lib:/x/y/ext", "both spellings expand to the dirname");
+            assert_eq!(
+                got,
+                b"/x/y/lib:/x/y/ext",
+                "both spellings expand to the dirname"
+            );
             crate::malloc::free(lib.rpath as *mut core::ffi::c_void);
         }
     }
