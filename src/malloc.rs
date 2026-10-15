@@ -602,21 +602,12 @@ mod tests {
             // free(NULL) is a no-op.
             free(null_mut());
             // Oversize fails clean, never panics.
-            assert!(
-                malloc(usize::MAX).is_null(),
-                "malloc MAX = {:p}",
-                malloc(usize::MAX)
-            );
-            assert!(
-                memalign(usize::MAX, 64).is_null(),
-                "memalign MAX = {:p}",
-                memalign(usize::MAX, 64)
-            );
-            assert!(
-                calloc(usize::MAX, 2).is_null(),
-                "calloc = {:p}",
-                calloc(usize::MAX, 2)
-            );
+            let o = malloc(usize::MAX);
+            eprintln!("EDGE malloc(MAX) = {:p}", o);
+            assert!(o.is_null());
+            let o2 = malloc(usize::MAX);
+            eprintln!("EDGE malloc(MAX) again = {:p}", o2);
+            assert!(calloc(usize::MAX, 2).is_null(), "calloc = {:p}", calloc(usize::MAX, 2));
             assert!(
                 realloc(null_mut(), usize::MAX).is_null(),
                 "realloc = {:p}",
@@ -708,9 +699,12 @@ mod tests {
         if std::env::var("ZLIBC_DEATH").is_ok() {
             unsafe {
                 let p = malloc(64);
+                eprintln!("CHILD p = {:p}", p);
                 assert!(!p.is_null());
                 free(p);
+                eprintln!("CHILD freed once; second free next");
                 free(p);
+                eprintln!("CHILD freed twice, detection missed it");
             }
             unreachable!("survived double free");
         }
@@ -750,11 +744,9 @@ mod tests {
     #[test]
     fn memalign_huge_alignment_fails_clean() {
         unsafe {
-            assert!(
-                memalign(usize::MAX, 64).is_null(),
-                "memalign(MAX,64) = {:p}",
-                memalign(usize::MAX, 64)
-            );
+            let m = memalign(usize::MAX, 64);
+            eprintln!("MEMALIGN memalign(MAX,64) = {:p}", m);
+            assert!(m.is_null());
             let a = aligned_alloc(64, 64);
             assert!(!a.is_null(), "aligned_alloc = {:p}", a);
             free(a);

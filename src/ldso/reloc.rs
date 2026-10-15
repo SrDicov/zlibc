@@ -853,13 +853,20 @@ mod tests {
             )
         };
         let want_fn: usize = tlsdesc_static as *const () as usize;
+        eprintln!(
+            "TLSDESC slot={:x} want_fn={:x} syms={:x} fatal={:x} rtype={}",
+            unsafe { *at(base, 0x08) },
+            want_fn,
+            find_sym as *const () as usize,
+            fatal as *const () as usize,
+            r_type(rela[1])
+        );
         assert_eq!(
             unsafe { *at(base, 0x08) },
             want_fn,
-            "tlsdesc slot = {:x}, want_fn = {:x}, base = {:x}",
+            "tlsdesc slot = {:x}, want_fn = {:x}",
             unsafe { *at(base, 0x08) },
-            want_fn,
-            base as usize
+            want_fn
         );
         assert_eq!(
             unsafe { *at(base, 0x10) },
