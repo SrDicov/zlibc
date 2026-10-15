@@ -284,8 +284,8 @@ mod tests {
     fn app_dso_reads_phdrs() {
         let _guard = lock();
         unsafe {
-            // Elf64Phdr is 7 u64 slots: p_type and p_flags are both u32
-            // and share the first one. Put PT_TLS in header 2.
+            // Elf64Phdr is 56 bytes (p_type and p_flags are u32 and share
+            // the first word). Put PT_TLS in header 2.
             let mut phdrs = [0u64; 32];
             const TLS_PH: usize = 2 * 7;
             phdrs[TLS_PH] = PT_TLS as u64 | ((4u64) << 32); // type | flags
@@ -298,7 +298,7 @@ mod tests {
             let mut aux = [0usize; AUX_CNT];
             aux[AT_PHDR] = phdrs.as_mut_ptr() as usize;
             aux[AT_PHNUM] = 3;
-            aux[AT_PHENT] = 64;
+            aux[AT_PHENT] = 56;
             aux[AT_BASE] = 0;
             let d = app_dso_from_aux(&aux);
             assert_eq!(d.phnum, 3);
