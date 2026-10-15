@@ -560,7 +560,6 @@ pub unsafe extern "C" fn memalign(alignment: usize, size: usize) -> *mut c_void 
 mod tests {
     use super::{aligned_alloc, calloc, free, malloc, memalign, posix_memalign, realloc, EINVAL};
     use core::ptr::null_mut;
-    use std::eprintln;
 
     unsafe fn sum(p: *mut u8, n: usize) -> usize {
         unsafe {
@@ -604,17 +603,13 @@ mod tests {
             free(null_mut());
             // Oversize fails clean, never panics.
             let o = malloc(usize::MAX);
-            eprintln!("EDGE malloc(MAX) = {:p}", o);
             assert!(o.is_null());
             let o2 = malloc(usize::MAX);
-            eprintln!("EDGE malloc(MAX) again = {:p}", o2);
             assert!(o2.is_null());
             let c = calloc(usize::MAX, 2);
-            eprintln!("EDGE calloc(MAX,2) = {:p}", c);
-            assert!(c.is_null(), "calloc = {:p}", c);
+            assert!(c.is_null());
             let r = realloc(null_mut(), usize::MAX);
-            eprintln!("EDGE realloc(null,MAX) = {:p}", r);
-            assert!(r.is_null(), "realloc = {:p}", r);
+            assert!(r.is_null());
         }
     }
 
@@ -701,15 +696,16 @@ mod tests {
         if std::env::var("ZLIBC_DEATH").is_ok() {
             unsafe {
                 let p = malloc(64);
-                eprintln!("CHILD p = {:p}", p);
                 assert!(!p.is_null());
                 free(p);
+                // Reclaim proves the first free really published the block
+                // (a second malloc hands the same address back), so the
+                // free below is a genuine double free rather than a
+                // detection test that would pass by never seeing it.
                 let q = malloc(64);
-                eprintln!("CHILD after one free, reclaim = {:p}", q);
+                assert_eq!(q, p, "free did not return the block to the list");
                 free(q);
-                eprintln!("CHILD freeing the same block twice now");
                 free(p);
-                eprintln!("CHILD freed twice, detection missed it");
             }
             unreachable!("survived double free");
         }
@@ -752,10 +748,9 @@ mod tests {
     fn memalign_huge_alignment_fails_clean() {
         unsafe {
             let m = memalign(usize::MAX, 64);
-            eprintln!("MEMALIGN memalign(MAX,64) = {:p}", m);
             assert!(m.is_null());
             let a = aligned_alloc(64, 64);
-            assert!(!a.is_null(), "aligned_alloc = {:p}", a);
+            assert!(!a.is_null());
             free(a);
         }
     }

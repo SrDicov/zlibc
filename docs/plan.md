@@ -384,9 +384,40 @@ use-after-unmap nondeterminista.
   of the mem trio, musl ordering). CLOSED: five binaries run on zlibc
   only, 59 lib tests green.
 
+## Release codegen gate (v0.12)
+
+CI now also builds `-O2` (musl target) and runs the whole suite under
+`cargo test --release`. It earns its keep immediately: three failures
+that `-O0` cannot see.
+
+- **Identity of a one-instruction function is not a stable value.** A
+  test comparing the `TLSDESC` slot against `tlsdesc_static as usize`
+  failed only at `-O2`: LLVM gave each call site its own copy of that
+  `ud2` function, so production and test compared *two addresses*
+  (slot was consistently `fatal - 8`). Fixed with a single
+  `#[inline(never)]` accessor used by both — the contract is "the slot
+  holds the resolver", not "equals this cast expression".
+- **`assert!(f(), "{}", f())` is two calls, not one.** The oversize
+  contract asserts printed `0x0` while failing: the condition's call and
+  the message's call diverged at `-O2`. Bind once, assert on the local.
+- **A death test that can pass by accident.** `free(p); free(p)` did not
+  trip detection at `-O2`; adding a reclaim round-trip
+  (`free(p); q = malloc(); assert_eq!(q, p); free(q); free(p)`) both
+  proves the first free published the block and trips the check. Same
+  lesson as the `#[no_mangle]` gate: a test that can pass when the code
+  under test is absent is worse than no test.
+- `#[cfg(debug_assertions)]` on the two `should_panic` guard tests —
+  in release there is no `debug_assert!`, so they would report a false
+  failure.
+- `mem*` self-call gate on the emitted release object: a byte-loop
+  turned into `call memcpy` is an infinite recursion, not a compile
+  error. The gate asserts the **symbol is present** first, because
+  "zero calls" otherwise also means "renamed away" — a gate that can
+  never fail is worse than no gate.
+
 ## "100% done" criteria
 
 - All public musl x86_64 symbols present with correct signature/ABI.
 - Static + dynamic hello world and a pthreads binary run on zlibc.
 - Probe asserts cover the whole musl `alltypes.h`.
-- CI green on `main`.
+- CI green on `main` (debug **and** release codegen).

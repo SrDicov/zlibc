@@ -615,7 +615,6 @@ pub unsafe fn do_relocs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::eprintln;
 
     /// `r_info` word: musl `ELF64_R_INFO` (include/elf.h:573).
     fn info(sym: usize, ty: u32) -> usize {
@@ -866,21 +865,7 @@ mod tests {
             )
         };
         let want_fn: usize = tlsdesc_static_ptr();
-        eprintln!(
-            "TLSDESC slot={:x} want_fn={:x} syms={:x} fatal={:x} rtype={}",
-            unsafe { *at(base, 0x08) },
-            want_fn,
-            find_sym as *const () as usize,
-            fatal as *const () as usize,
-            r_type(rela[1])
-        );
-        assert_eq!(
-            unsafe { *at(base, 0x08) },
-            want_fn,
-            "tlsdesc slot = {:x}, want_fn = {:x}",
-            unsafe { *at(base, 0x08) },
-            want_fn
-        );
+        assert_eq!(unsafe { *at(base, 0x08) }, want_fn);
         assert_eq!(
             unsafe { *at(base, 0x10) },
             0x10usize.wrapping_sub(0x40).wrapping_add(6)
