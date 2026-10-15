@@ -380,9 +380,9 @@ mod tests {
     use core::ptr::{addr_of, addr_of_mut, null_mut};
     use core::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::sync::{pthread_mutex_lock, pthread_mutex_unlock, MutexT};
 
     use crate::ldso::dso::Dso;
+    use crate::ldso::testlock::lock;
     use crate::ldso::reloc::streq;
     use crate::ldso::{DT_NEEDED, DT_NULL};
 
@@ -435,34 +435,6 @@ mod tests {
 
     fn zeroed_dso() -> Dso {
         unsafe { core::mem::zeroed() }
-    }
-
-    /// Serializes the tests below: they own the loader's global state
-    /// (`head`/`tail`/`syms_tail`, plus `TABLE`), exactly like the
-    /// thread tests own the registry. libtest runs a module's tests in
-    /// parallel by default, and two link-map tests interleaving would
-    /// corrupt each other's namespace — the failure would look like a
-    /// traversal bug, which is the worst possible lie.
-    static mut TEST_LOCK: MutexT = [0; 5];
-
-    /// Releases the lock on drop, so a failing assertion reports instead of
-    /// deadlocking every later test in the binary.
-    struct TestGuard;
-
-    impl Drop for TestGuard {
-        fn drop(&mut self) {
-            unsafe {
-                pthread_mutex_unlock(addr_of_mut!(TEST_LOCK));
-            }
-        }
-    }
-
-    /// Take the lock; the returned guard holds it until the test ends.
-    fn lock() -> TestGuard {
-        unsafe {
-            pthread_mutex_lock(addr_of_mut!(TEST_LOCK));
-        }
-        TestGuard
     }
 
     /// Namespace order as a list of the `name` fields, so a wrong BFS

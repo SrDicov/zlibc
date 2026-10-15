@@ -15,6 +15,44 @@ pub mod linkmap;
 pub mod reloc;
 pub mod tlsmod;
 
+/// Serializes every test that touches loader-global state (the namespace
+/// heads, the deferred-reloc list, `STATIC_TLS_CNT`).
+///
+/// libtest runs a module's tests in parallel by default, and these tests
+/// deliberately poke process-wide state: two interleaved link-map tests
+/// would corrupt each other's namespace and the failure would read like
+/// a traversal bug, which is the worst possible lie. One lock for the
+/// whole `ldso` tree, because the state is shared across modules and CI
+/// splits the suite into parallel and serial steps.
+///
+/// Release-on-drop, so a failing assertion reports instead of deadlocking
+/// every later test in the binary.
+#[cfg(test)]
+pub(crate) mod testlock {
+    use core::ptr::addr_of_mut;
+
+    use crate::sync::{pthread_mutex_lock, pthread_mutex_unlock, MutexT};
+
+    pub(crate) static mut LOCK: MutexT = [0; 5];
+
+    pub(crate) struct Guard;
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            unsafe {
+                pthread_mutex_unlock(addr_of_mut!(LOCK));
+            }
+        }
+    }
+
+    pub(crate) fn lock() -> Guard {
+        unsafe {
+            pthread_mutex_lock(addr_of_mut!(LOCK));
+        }
+        Guard
+    }
+}
+
 use core::ffi::c_int;
 
 // ---- Syscalls (musl arch/x86_64/bits/syscall.h.in) ------------------------
