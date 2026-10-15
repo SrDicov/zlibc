@@ -18,12 +18,14 @@ root=$(dirname "$0")/..
 baseline=$root/tools/musl-exports.txt
 src=$root/src
 
-# zlibc's export surface: every `#[no_mangle]` function plus every weak
-# alias name. Four lines of context covers attributes between the marker
-# and the signature.
+# zlibc's export surface: every `#[no_mangle]` item (functions and data)
+# plus every weak alias name. Four lines of context covers attributes
+# between the marker and the signature.
 {
     grep -rA4 '#\[no_mangle\]' "$src" --include='*.rs' \
         | grep -oE '\bfn [A-Za-z_][A-Za-z_0-9]*' | sed 's/fn //'
+    grep -rA4 '#\[no_mangle\]' "$src" --include='*.rs' \
+        | grep -oE '\bstatic( mut)? [A-Za-z_][A-Za-z_0-9]*' | sed -E 's/static( mut)? //'
     grep -rhoE 'weak_alias!\([A-Za-z_][A-Za-z_0-9]*' "$src" --include='*.rs' \
         | sed 's/.*(//'
 } | sort -u > /tmp/zlibc-syms.$$
