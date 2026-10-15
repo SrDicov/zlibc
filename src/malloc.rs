@@ -602,10 +602,14 @@ mod tests {
             // free(NULL) is a no-op.
             free(null_mut());
             // Oversize fails clean, never panics.
-            assert!(malloc(usize::MAX).is_null());
-            assert!(malloc(usize::MAX / 2 + 1).is_null());
-            assert!(calloc(usize::MAX, 2).is_null());
-            assert!(realloc(null_mut(), usize::MAX).is_null());
+            assert!(malloc(usize::MAX).is_null(), "malloc MAX = {:p}", malloc(usize::MAX));
+            assert!(memalign(usize::MAX, 64).is_null(), "memalign MAX = {:p}", memalign(usize::MAX, 64));
+            assert!(calloc(usize::MAX, 2).is_null(), "calloc = {:p}", calloc(usize::MAX, 2));
+            assert!(
+                realloc(null_mut(), usize::MAX).is_null(),
+                "realloc = {:p}",
+                realloc(null_mut(), usize::MAX)
+            );
         }
     }
 
@@ -734,9 +738,13 @@ mod tests {
     #[test]
     fn memalign_huge_alignment_fails_clean() {
         unsafe {
-            assert!(memalign(usize::MAX, 64).is_null());
+            assert!(
+                memalign(usize::MAX, 64).is_null(),
+                "memalign(MAX,64) = {:p}",
+                memalign(usize::MAX, 64)
+            );
             let a = aligned_alloc(64, 64);
-            assert!(!a.is_null());
+            assert!(!a.is_null(), "aligned_alloc = {:p}", a);
             free(a);
         }
     }

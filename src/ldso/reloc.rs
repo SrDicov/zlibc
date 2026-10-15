@@ -853,7 +853,14 @@ mod tests {
             )
         };
         let want_fn: usize = tlsdesc_static as *const () as usize;
-        assert_eq!(unsafe { *at(base, 0x08) }, want_fn);
+        assert_eq!(
+            unsafe { *at(base, 0x08) },
+            want_fn,
+            "tlsdesc slot = {:x}, want_fn = {:x}, base = {:x}",
+            unsafe { *at(base, 0x08) },
+            want_fn,
+            base as usize
+        );
         assert_eq!(
             unsafe { *at(base, 0x10) },
             0x10usize.wrapping_sub(0x40).wrapping_add(6)
