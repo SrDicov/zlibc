@@ -484,7 +484,11 @@ unsafe fn gnu_lookup_filtered(
 ///
 /// Every `Dso` in the chain must satisfy the table validity of
 /// [`sysv_lookup`]; `s` must be NUL-terminated.
-pub(crate) unsafe fn find_sym(head: *mut Dso, s: *const c_char, need_def: bool) -> (*mut Dso, *mut Elf64Sym) {
+pub(crate) unsafe fn find_sym(
+    head: *mut Dso,
+    s: *const c_char,
+    need_def: bool,
+) -> (*mut Dso, *mut Elf64Sym) {
     unsafe {
         let gh = gnu_hash(s);
         let mut h: u32 = 0;

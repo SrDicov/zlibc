@@ -152,7 +152,9 @@ pub unsafe fn addr2dso(addr: usize) -> *mut Dso {
                 let stride = (*p).phentsize;
                 let mut i = 0usize;
                 while i < phnum as usize {
-                    let ph = &*phdr.wrapping_byte_add(i * stride).cast::<super::Elf64Phdr>();
+                    let ph = &*phdr
+                        .wrapping_byte_add(i * stride)
+                        .cast::<super::Elf64Phdr>();
                     if ph.p_type == super::PT_LOAD && ph.p_memsz != 0 {
                         let start = base.wrapping_add(ph.p_vaddr as usize);
                         let end = start.wrapping_add(ph.p_memsz as usize);
@@ -287,11 +289,7 @@ pub extern "C" fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void
 /// return address musl's trampoline fetched.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
-pub extern "C" fn __dlsym(
-    handle: *mut c_void,
-    name: *const c_char,
-    ra: usize,
-) -> *mut c_void {
+pub extern "C" fn __dlsym(handle: *mut c_void, name: *const c_char, ra: usize) -> *mut c_void {
     unsafe { do_dlsym(handle, name, ra) }
 }
 
@@ -315,7 +313,10 @@ mod tests {
                     n += 1;
                 }
             }
-            assert_eq!(unsafe { core::slice::from_raw_parts(first as *const u8, 6) }, b"boom\0");
+            assert_eq!(
+                unsafe { core::slice::from_raw_parts(first as *const u8, 6) },
+                b"boom\0"
+            );
             assert!(dlerror().is_null(), "flag cleared by the first read");
         }
     }
