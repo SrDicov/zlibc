@@ -37,8 +37,8 @@ static SYMS_TAIL: AtomicPtr<Dso> = AtomicPtr::new(null_mut());
 /// object at these instead of `calloc`, deliberately keeping "no
 /// runtime failure path" for the common case (musl:1274-1277); a
 /// failing `calloc` for an app with real deps stays fatal there.
-static mut NO_DEPS: [*mut Dso; 1] = [null_mut()];
-static mut BUILTIN_DEPS: [*mut Dso; 2] = [null_mut(), null_mut()];
+static NO_DEPS: [*mut Dso; 1] = [null_mut()];
+static BUILTIN_DEPS: [*mut Dso; 2] = [null_mut(), null_mut()];
 
 /// Loads one dependency by name, musl `load_library` (`dynlink.c:1062`)
 /// reduced to the contract the walk needs: return the mapped `Dso`
@@ -172,6 +172,9 @@ pub unsafe fn load_direct_deps(p: *mut Dso, load: LoadFn) -> bool {
         // runtime failure path; everything else, a plain library with
         // zero deps included, allocates one terminator slot.
         if is_head && cnt < 2 {
+            //musl hands out `static` storage that is only ever written through
+            // the `*mut` it returns, so `static` (not `static mut`) is
+            // the honest declaration: no aliasing reference exists.
             (*p).deps = BUILTIN_DEPS.as_ptr().cast_mut();
         } else {
             let slots = crate::malloc::calloc(cnt + 1, size_of::<*mut Dso>());
