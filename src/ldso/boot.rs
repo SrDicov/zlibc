@@ -373,7 +373,7 @@ unsafe fn stat_key(fd: c_int) -> Option<(u64, u64)> {
         return None;
     }
     let st = buf.as_ptr() as *const crate::abi::StatKey;
-    Some(((*st).st_dev, (*st).st_ino))
+    Some(unsafe { ((*st).st_dev, (*st).st_ino) })
 }
 
 /// True when `LDSO` already sits in the namespace list.
