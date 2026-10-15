@@ -644,12 +644,12 @@ mod tests {
             let mut empty = [0u8; 8];
             let mut none = [DT_NULL, 0usize];
             app.name = empty.as_mut_ptr() as *mut c_char;
-            app.shortname = b"app.bin\0".as_ptr() as *mut c_char;
+            app.shortname = c"app.bin".as_ptr() as *mut c_char;
             app.dev = 1;
             app.ino = 1;
             app.dynv = none.as_mut_ptr();
             lib.name = empty.as_mut_ptr() as *mut c_char;
-            lib.shortname = b"libz.so\0".as_ptr() as *mut c_char;
+            lib.shortname = c"libz.so".as_ptr() as *mut c_char;
             lib.dev = 2;
             lib.ino = 7;
             lib.dynv = none.as_mut_ptr();
