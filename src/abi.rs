@@ -86,3 +86,16 @@ pub struct PthreadOpaque {
 /// musl `pthread_t` on x86_64: pointer to the opaque thread struct.
 #[cfg(target_arch = "x86_64")]
 pub type PthreadT = *mut PthreadOpaque;
+
+/// The only `struct stat` prefix the loader reads: musl's `(st_dev,
+/// st_ino)` dedup key (`ldso/dynlink.c:1174`). Modelled as exactly the
+/// two fields the loader touches, not the whole struct — the probe
+/// asserts both offsets, so a refactor that reorders or widens the
+/// mirror fails the build instead of silently aliasing two different
+/// files to the same identity.
+#[cfg(target_arch = "x86_64")]
+#[repr(C)]
+pub struct StatKey {
+    pub st_dev: u64,
+    pub st_ino: u64,
+}

@@ -16,6 +16,7 @@
 #include <link.h> /* Elf_Symndx (arch/generic/bits/link.h:1) for the dso probe */
 #include <stdint.h> /* uint32_t/int16_t/uintptr_t for the dso probe */
 #include <sys/types.h> /* dev_t/ino_t for the dso probe */
+#include <sys/stat.h> /* struct stat: the loader's (st_dev, st_ino) dedup key */
 #include "libc.h" /* struct tls_module (src/internal/libc.h:14-18) for the dso probe */
 
 #define E(n, v) printf(#n " %lu\n", (unsigned long)(v))
@@ -195,5 +196,7 @@ int main(void)
 	E(OFF_DSO_LOADMAP, offsetof(struct zlibc_dso, loadmap));
 	E(OFF_DSO_FUNCDESCS, offsetof(struct zlibc_dso, funcdescs));
 	E(OFF_DSO_GOT, offsetof(struct zlibc_dso, got));
+	E(OFF_STAT_DEV, offsetof(struct stat, st_dev));
+	E(OFF_STAT_INO, offsetof(struct stat, st_ino));
 	return 0;
 }
