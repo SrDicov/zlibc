@@ -368,7 +368,7 @@ pub unsafe fn redo_lazy_relocs(head: *mut Dso) {
             if (*p).lazy_cnt != 0 {
                 crate::ldso::linkmap::push_lazy(p);
             } else {
-                let _ = crate::malloc::free((*p).lazy as *mut core::ffi::c_void);
+                crate::malloc::free((*p).lazy as *mut core::ffi::c_void);
                 (*p).lazy = core::ptr::null_mut();
                 (*p).lazy_next = core::ptr::null_mut();
             }
