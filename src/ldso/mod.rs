@@ -13,6 +13,7 @@ pub mod dlstart;
 pub mod dso;
 pub mod linkmap;
 pub mod reloc;
+pub mod tlsmod;
 
 use core::ffi::c_int;
 

@@ -360,7 +360,19 @@ use-after-unmap nondeterminista.
   `head->next`. 6 tests, incl. the diamond `app→{B,C}`, `B,C→{D}`.
   Lesson: tests over loader globals need the same serialization as
   the thread tests, and strtab offsets must be counted, not eyeballed.
-  Next: 6C dynamic TLS, 6D lazy PLT + `libdl`, 6E musl-gcc gate.
+  Packet 6C-1 DONE: `src/ldso/tlsmod.rs` — TLS module geometry.
+  x86_64 has no `TLS_ABOVE_TP`, so modules are placed *downward* from
+  the thread pointer: the first module's offset is its `size` padded so
+  `image + size ≡ 0 (mod align)`, and each later one bumps a running
+  mark and pulls it back to `offset ≡ image (mod align)`. Tests assert
+  that congruence directly, because a sign slip here is a silent
+  misalignment. Packet 6C-2 DONE: real `__tlsdesc_static` /
+  `__tlsdesc_dynamic` resolvers in naked asm (musl `tlsdesc.s` is
+  **AT&T** — `options(att_syntax)` is required, the Rust default is
+  Intel), the `td_index` record and the dynamic `REL_TLSDESC` arm,
+  which used to be a fatal path. `__tls_get_addr` returns an absolute
+  address — no `- TP`, unlike the descriptors. Next: 6D lazy PLT +
+  `libdl`, 6E musl-gcc gate.
 - **Audit batch (v0.11, all green, 73 tests):** three parallel audits,
   every load-bearing finding fixed + tested — pre-clone registry link
   (detached-child UAF), honest `raw_clone` clobbers, magic-gated canary,
