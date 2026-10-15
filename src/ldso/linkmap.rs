@@ -18,7 +18,8 @@
 //! `40355569` (2019-02-26), so this shape is the one to mirror.
 
 use core::ffi::c_char;
-use core::ptr::{addr_of, addr_of_mut, null_mut};
+use core::ptr::null_mut;
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 use super::dso::Dso;
 use super::DT_NEEDED;
@@ -27,9 +28,9 @@ use super::DT_NEEDED;
 // (`syms_tail`). `#[no_mangle]`-adjacent loader state has no thread
 // owner yet: 6B is single-threaded bootstrap, and dlopen-time locking
 // lands with 6D.
-static mut HEAD: *mut Dso = null_mut();
-static mut TAIL: *mut Dso = null_mut();
-static mut SYMS_TAIL: *mut Dso = null_mut();
+static HEAD: AtomicPtr<Dso> = AtomicPtr::new(null_mut());
+static TAIL: AtomicPtr<Dso> = AtomicPtr::new(null_mut());
+static SYMS_TAIL: AtomicPtr<Dso> = AtomicPtr::new(null_mut());
 
 /// musl `no_deps` (an empty, const array) and `builtin_deps[2]`
 /// (`dynlink.c:157-158`). `load_direct_deps` points a dependency-free
@@ -50,41 +51,27 @@ static mut BUILTIN_DEPS: [*mut Dso; 2] = [null_mut(), null_mut()];
 pub type LoadFn = unsafe fn(name: *const c_char, needed_by: *mut Dso) -> *mut Dso;
 
 /// Current namespace head (musl `head`).
-/// # Safety
-///
-/// The namespace must be initialized; the returned pointer is only
-/// meaningful while it is.
-pub unsafe fn head() -> *mut Dso {
-    unsafe { addr_of!(HEAD).read() }
+pub fn head() -> *mut Dso {
+    HEAD.load(Ordering::Acquire)
 }
 
 /// Current namespace tail (musl `tail`).
-/// # Safety
-///
-/// The namespace must be initialized; the returned pointer is only
-/// meaningful while it is.
-pub unsafe fn tail() -> *mut Dso {
-    unsafe { addr_of!(TAIL).read() }
+pub fn tail() -> *mut Dso {
+    TAIL.load(Ordering::Acquire)
 }
 
 /// Current global-scope tail (musl `syms_tail`).
-/// # Safety
-///
-/// The namespace must be initialized; the returned pointer is only
-/// meaningful while it is.
-pub unsafe fn syms_tail() -> *mut Dso {
-    unsafe { addr_of!(SYMS_TAIL).read() }
+pub fn syms_tail() -> *mut Dso {
+    SYMS_TAIL.load(Ordering::Acquire)
 }
 
 /// Install the namespace starting point (musl `__dls2`/`__dls3`: `head`
 /// is re-pointed once the main program is known, `dynlink.c:1760`,
 /// `:1959`).
 pub fn set_namespace(first: *mut Dso) {
-    unsafe {
-        addr_of_mut!(HEAD).write(first);
-        addr_of_mut!(TAIL).write(first);
-        addr_of_mut!(SYMS_TAIL).write(first);
-    }
+    HEAD.store(first, Ordering::Release);
+    TAIL.store(first, Ordering::Release);
+    SYMS_TAIL.store(first, Ordering::Release);
 }
 
 /// Forget every list (test isolation and the 6D `dlclose` reset). The
@@ -101,17 +88,17 @@ pub fn reset_namespace() {
 /// `p` must be a valid, unlinked `Dso`.
 pub unsafe fn append_namespace(p: *mut Dso) {
     unsafe {
-        let t = addr_of!(TAIL).read();
+        let t = TAIL.load(Ordering::Acquire);
         if t.is_null() {
-            addr_of_mut!(HEAD).write(p);
-            addr_of_mut!(TAIL).write(p);
-            if addr_of!(SYMS_TAIL).read().is_null() {
-                addr_of_mut!(SYMS_TAIL).write(p);
+            HEAD.store(p, Ordering::Release);
+            TAIL.store(p, Ordering::Release);
+            if SYMS_TAIL.load(Ordering::Acquire).is_null() {
+                SYMS_TAIL.store(p, Ordering::Release);
             }
         } else {
             (*t).next = p;
             (*p).prev = t;
-            addr_of_mut!(TAIL).write(p);
+            TAIL.store(p, Ordering::Release);
         }
         (*p).next = null_mut();
     }
@@ -162,7 +149,7 @@ pub unsafe fn load_direct_deps(p: *mut Dso, load: LoadFn) -> bool {
         if !(*p).deps.is_null() {
             return true;
         }
-        let is_head = core::ptr::eq(p, addr_of!(HEAD).read());
+        let is_head = core::ptr::eq(p, HEAD.load(Ordering::Acquire));
         let mut cnt = 0usize;
         let needed = count_needed(p);
         cnt += needed;
@@ -185,13 +172,13 @@ pub unsafe fn load_direct_deps(p: *mut Dso, load: LoadFn) -> bool {
         // runtime failure path; everything else, a plain library with
         // zero deps included, allocates one terminator slot.
         if is_head && cnt < 2 {
-            (*p).deps = addr_of_mut!(BUILTIN_DEPS).cast::<*mut Dso>();
+            (*p).deps = BUILTIN_DEPS.as_ptr();
         } else {
             let slots = crate::malloc::calloc(cnt + 1, size_of::<*mut Dso>());
             if slots.is_null() {
                 // musl prints and (at startup) keeps going into a NULL
                 // `deps`; we stop before that and report the failure.
-                (*p).deps = addr_of_mut!(NO_DEPS).cast::<*mut Dso>();
+                (*p).deps = NO_DEPS.as_ptr();
                 return false;
             }
             (*p).deps = slots as *mut *mut Dso;
@@ -276,10 +263,10 @@ pub unsafe fn load_deps(from: *mut Dso, load: LoadFn) -> bool {
 /// `p` must be a valid `Dso` not already in the chain.
 pub unsafe fn add_syms(p: *mut Dso) {
     unsafe {
-        let st = addr_of!(SYMS_TAIL).read();
+        let st = SYMS_TAIL.load(Ordering::Acquire);
         if (*p).syms_next.is_null() && !core::ptr::eq(st, p) {
             (*st).syms_next = p;
-            addr_of_mut!(SYMS_TAIL).write(p);
+            SYMS_TAIL.store(p, Ordering::Release);
         }
     }
 }
@@ -298,7 +285,7 @@ pub unsafe fn revert_syms(old_tail: *mut Dso) {
             (*p).syms_next = null_mut();
             p = next;
         }
-        addr_of_mut!(SYMS_TAIL).write(old_tail);
+        SYMS_TAIL.store(old_tail, Ordering::Release);
     }
 }
 
@@ -324,7 +311,7 @@ pub unsafe fn find_by_shortname(name: *const c_char) -> *mut Dso {
             }
             k += 1;
         }
-        let h = addr_of!(HEAD).read();
+        let h = HEAD.load(Ordering::Acquire);
         let mut p = if h.is_null() { null_mut() } else { (*h).next };
         while !p.is_null() {
             if !(*p).shortname.is_null() && super::reloc::streq((*p).shortname, name) {
@@ -346,7 +333,7 @@ pub unsafe fn find_by_shortname(name: *const c_char) -> *mut Dso {
 /// The namespace must be valid.
 pub unsafe fn find_by_inode(dev: u64, ino: u64) -> *mut Dso {
     unsafe {
-        let h = addr_of!(HEAD).read();
+        let h = HEAD.load(Ordering::Acquire);
         let mut p = if h.is_null() { null_mut() } else { (*h).next };
         while !p.is_null() {
             if (*p).dev == dev && (*p).ino == ino {
