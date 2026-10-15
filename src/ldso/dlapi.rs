@@ -313,10 +313,18 @@ mod tests {
     use super::*;
     use crate::ldso::testlock::lock;
 
+    /// The error slot is process-global, and libtest runs these in some
+    /// order: every test starts by draining whatever the previous one
+    /// left behind, so "no pending error" really means that.
+    fn drain() {
+        let _ = dlerror();
+    }
+
     /// `dlerror` hands the message out exactly once (musl `dlerror.c:14-18`).
     #[test]
     fn dlerror_returns_once() {
         let _guard = lock();
+        drain();
         unsafe {
             assert!(dlerror().is_null(), "no pending error to start");
             set_error(b"boom");
@@ -339,6 +347,7 @@ mod tests {
     #[test]
     fn dlerror_buffer_has_the_pointer_floor() {
         let _guard = lock();
+        drain();
         unsafe {
             set_error(b"x");
             let p = dlerror();
@@ -356,6 +365,7 @@ mod tests {
     #[test]
     fn dlclose_is_a_no_op_for_live_handles() {
         let _guard = lock();
+        drain();
         unsafe {
             linkmap::reset_namespace();
             let mut d: Dso = core::mem::zeroed();
@@ -374,6 +384,7 @@ mod tests {
     #[test]
     fn dlsym_on_empty_namespace_misses_cleanly() {
         let _guard = lock();
+        drain();
         linkmap::reset_namespace();
         assert!(dlsym(RTLD_DEFAULT, c"nope".as_ptr()).is_null());
         assert!(!dlerror().is_null());
@@ -385,6 +396,7 @@ mod tests {
     #[test]
     fn dlsym_rejects_unknown_handle() {
         let _guard = lock();
+        drain();
         {
             linkmap::reset_namespace();
             let mut d: Dso = unsafe { core::mem::zeroed() };

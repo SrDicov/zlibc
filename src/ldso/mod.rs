@@ -9,6 +9,7 @@
 //! `crate::syscall::SYS_WRITE` until they are generated from
 //! `arch/x86_64/bits/`.
 
+pub mod boot;
 pub mod dlapi;
 pub mod dlstart;
 pub mod dso;
@@ -102,6 +103,13 @@ pub const PT_LOAD: u32 = 1;
 /// musl `PT_DYNAMIC` (musl `include/elf.h:603`).
 #[cfg(target_arch = "x86_64")]
 pub const PT_DYNAMIC: u32 = 2;
+/// musl `PT_INTERP` (musl `include/elf.h:604`): the program interpreter
+/// path, i.e. which dynamic linker asked for this image.
+#[cfg(target_arch = "x86_64")]
+pub const PT_INTERP: u32 = 3;
+/// musl `PT_TLS` (musl `include/elf.h:608`): the thread-local template.
+#[cfg(target_arch = "x86_64")]
+pub const PT_TLS: u32 = 7;
 /// musl `PF_X/W/R` (musl `include/elf.h:627-629`).
 #[cfg(target_arch = "x86_64")]
 pub const PF_X: u32 = 1 << 0;

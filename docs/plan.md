@@ -396,8 +396,19 @@ use-after-unmap nondeterminista.
   the third argument is the caller's return address, which is how
   `RTLD_NEXT` knows who asked. `RTLD_NOW`/`RTLD_NODELETE` are accepted
   and ignored, exactly like musl.
-  Next: `dlopen` proper (path search + the load/reloc/ctor sequence),
-  6E musl-gcc gate.
+  Gate packet DONE: `src/ldso/boot.rs` — the `__dls3` tail. Build the
+  program's `Dso` from `auxv`, seed the namespace, walk deps, add every
+  object to the symbol scope, then `reloc_all` for everything **except**
+  the program and the program separately with `skip_relative` (because
+  `_dlstart` already applied its `RELATIVE` entries — `dynlink.c:2030-2031`
+  is the other half of why the program goes last: copy relocations).
+  Also `do_relr_relocs`, which we had no path for.
+  Lesson: `sizeof(Elf64Phdr)` is **56**, not 64 — `p_type` and `p_flags`
+  are both `u32` and share the first word. Hand-computing an ELF stride
+  wrong makes a phdr scan silently read the wrong field, which is exactly
+  the kind of bug a fixture with one header cannot catch.
+  Next: real `load_library` (self-name check + path search + inode dedup)
+  and then the 6E musl-gcc gate.
 - **Audit batch (v0.11, all green, 73 tests):** three parallel audits,
   every load-bearing finding fixed + tested — pre-clone registry link
   (detached-child UAF), honest `raw_clone` clobbers, magic-gated canary,
