@@ -354,6 +354,8 @@ mod tests {
     use core::ptr::{addr_of, addr_of_mut, null_mut};
     use core::sync::atomic::{AtomicUsize, Ordering};
 
+    use crate::sync::{pthread_mutex_lock, pthread_mutex_unlock, MutexT};
+
     use crate::ldso::dso::Dso;
     use crate::ldso::reloc::streq;
     use crate::ldso::{DT_NEEDED, DT_NULL};
@@ -409,6 +411,34 @@ mod tests {
         unsafe { core::mem::zeroed() }
     }
 
+    /// Serializes the tests below: they own the loader's global state
+    /// (`head`/`tail`/`syms_tail`, plus `TABLE`), exactly like the
+    /// thread tests own the registry. libtest runs a module's tests in
+    /// parallel by default, and two link-map tests interleaving would
+    /// corrupt each other's namespace — the failure would look like a
+    /// traversal bug, which is the worst possible lie.
+    static TEST_LOCK: MutexT = [0; 5];
+
+    /// Releases the lock on drop, so a failing assertion reports instead of
+/// deadlocking every later test in the binary.
+    struct TestGuard;
+
+    impl Drop for TestGuard {
+        fn drop(&mut self) {
+            unsafe {
+                pthread_mutex_unlock(addr_of_mut!(TEST_LOCK));
+            }
+        }
+    }
+
+    /// Take the lock; the returned guard holds it until the test ends.
+    fn lock() -> TestGuard {
+        unsafe {
+            pthread_mutex_lock(addr_of_mut!(TEST_LOCK));
+        }
+        TestGuard
+    }
+
     /// Namespace order as a list of the `name` fields, so a wrong BFS
     /// order reads as `["app","libC.so","libB.so",...]` in the failure.
     fn namespace() -> [*const c_char; 8] {
@@ -431,6 +461,7 @@ mod tests {
     #[test]
     fn bfs_order_is_app_b_c_d() {
         unsafe {
+            let _guard = lock();
             reset_namespace();
             unregister_all();
 
@@ -497,6 +528,7 @@ mod tests {
     #[test]
     fn load_deps_is_idempotent() {
         unsafe {
+            let _guard = lock();
             reset_namespace();
             unregister_all();
             let mut app = zeroed_dso();
@@ -535,6 +567,7 @@ mod tests {
     #[test]
     fn missing_dependency_reports_and_continues() {
         unsafe {
+            let _guard = lock();
             reset_namespace();
             unregister_all();
             let mut app = zeroed_dso();
@@ -568,6 +601,7 @@ mod tests {
     #[test]
     fn add_and_revert_syms_chain() {
         unsafe {
+            let _guard = lock();
             reset_namespace();
             unregister_all();
             let mut a = zeroed_dso();
@@ -602,6 +636,7 @@ mod tests {
     #[test]
     fn dedup_lookups_skip_the_main_program() {
         unsafe {
+            let _guard = lock();
             reset_namespace();
             unregister_all();
             let mut app = zeroed_dso();
@@ -609,12 +644,12 @@ mod tests {
             let mut empty = [0u8; 8];
             let mut none = [DT_NULL, 0usize];
             app.name = empty.as_mut_ptr() as *mut c_char;
-            app.shortname = b"app.bin".as_ptr() as *mut c_char;
+            app.shortname = b"app.bin\0".as_ptr() as *mut c_char;
             app.dev = 1;
             app.ino = 1;
             app.dynv = none.as_mut_ptr();
             lib.name = empty.as_mut_ptr() as *mut c_char;
-            lib.shortname = b"libz.so".as_ptr() as *mut c_char;
+            lib.shortname = b"libz.so\0".as_ptr() as *mut c_char;
             lib.dev = 2;
             lib.ino = 7;
             lib.dynv = none.as_mut_ptr();
@@ -637,6 +672,7 @@ mod tests {
     /// the first zero tag.
     #[test]
     fn count_needed_counts_only_needed() {
+        // Pure function over caller-owned memory: no globals, no lock.
         unsafe {
             let mut d = zeroed_dso();
             let mut dynv = [
