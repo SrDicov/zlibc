@@ -738,6 +738,118 @@ mod tests {
         std::ffi::CString::new(s).unwrap()
     }
 
+    /// `path_open` tries every directory in order and stops at the
+    /// first hit; a missing name exhausts the list. Uses the real
+    /// filesystem (`/bin/sh` exists on any Linux CI/dev machine, same
+    /// assumption the `/proc` tests elsewhere already make).
+    #[test]
+    fn path_open_finds_first_hit() {
+        let _guard = lock();
+        unsafe {
+            let mut buf = [0u8; 4096];
+            let fd = path_open(
+                c"sh".as_ptr(),
+                c"/nope-zzz:/bin:/usr/bin".as_ptr(),
+                buf.as_mut_ptr(),
+                buf.len(),
+            );
+            assert!(fd >= 0, "sh must be found under /bin or /usr/bin");
+            super::super::dso::close_object(fd);
+            let missing = path_open(
+                c"definitely-not-here-zzz".as_ptr(),
+                c"/bin:/usr/bin".as_ptr(),
+                buf.as_mut_ptr(),
+                buf.len(),
+            );
+            assert_eq!(missing, -1);
+        }
+    }
+
+    /// `fixup_rpath` shares the string when there is no `$`, rejects a
+    /// `$` that is not `$ORIGIN`, and expands `$ORIGIN` against the
+    /// dirname of a library's own path.
+    #[test]
+    fn fixup_rpath_expands_origin_for_libraries() {
+        let _guard = lock();
+        unsafe {
+            let mut plain: Dso = core::mem::zeroed();
+            let rpath = c"/a:/b".as_ptr() as *mut c_char;
+            plain.rpath_orig = rpath;
+            let mut buf = [0u8; 4096];
+            assert_eq!(fixup_rpath(&mut plain as *mut Dso, buf.as_mut_ptr(), buf.len()), 0);
+            assert_eq!(plain.rpath, rpath, "shared, not copied");
+
+            let mut bad: Dso = core::mem::zeroed();
+            bad.rpath_orig = c"/a/$FOO/b".as_ptr() as *mut c_char;
+            assert_eq!(fixup_rpath(&mut bad as *mut Dso, buf.as_mut_ptr(), buf.len()), 0);
+            assert!(bad.rpath.is_null(), "unexpandable entry is skipped");
+
+            let mut lib: Dso = core::mem::zeroed();
+            lib.name = c"/x/y/libz.so".as_ptr() as *mut c_char;
+            lib.rpath_orig = c"$ORIGIN/lib:${ORIGIN}/extra".as_ptr() as *mut c_char;
+            assert_eq!(fixup_rpath(&mut lib as *mut Dso, buf.as_mut_ptr(), buf.len()), 0);
+            assert!(!lib.rpath.is_null());
+            let got = core::slice::from_raw_parts(lib.rpath as *const u8, 17);
+            assert_eq!(got, b"/x/y/lib:/x/y/ext", "both spellings expand to the dirname");
+            crate::malloc::free(lib.rpath as *mut core::ffi::c_void);
+        }
+    }
+
+    /// `search_bare` honors `LD_LIBRARY_PATH` unless secure: `/proc`
+    /// is in no default path, so `version` is found only through the
+    /// environment. This is the exact gate `libc.secure` closes.
+    #[test]
+    fn search_bare_gates_env_on_secure() {
+        let _guard = lock();
+        unsafe {
+            let mut buf = [0u8; 4096];
+            let env = c"/proc".as_ptr();
+            let found = search_bare(
+                c"version".as_ptr(),
+                core::ptr::null_mut(),
+                env,
+                buf.as_mut_ptr(),
+                buf.len(),
+            );
+            assert!(found >= 0, "insecure search reads LD_LIBRARY_PATH");
+            super::super::dso::close_object(found);
+            // Secure: env skipped, needed_by empty, defaults lack
+            // /proc — nothing to find. `secure` is not passed here;
+            // the null env models what `live_env_path` hands out when
+            // `loader_secure()` is true.
+            let missing = search_bare(
+                c"version".as_ptr(),
+                core::ptr::null_mut(),
+                core::ptr::null(),
+                buf.as_mut_ptr(),
+                buf.len(),
+            );
+            assert_eq!(missing, -1);
+        }
+    }
+
+    /// A `needed_by` ancestor's `RUNPATH` is searched after the
+    /// environment (musl `dynlink.c:1122-1128`).
+    #[test]
+    fn search_bare_walks_needed_by_rpath() {
+        let _guard = lock();
+        unsafe {
+            let mut buf = [0u8; 4096];
+            let mut app: Dso = core::mem::zeroed();
+            app.rpath_orig = c"/bin".as_ptr() as *mut c_char;
+            assert_eq!(fixup_rpath(&mut app as *mut Dso, buf.as_mut_ptr(), buf.len()), 0);
+            let found = search_bare(
+                c"sh".as_ptr(),
+                &mut app as *mut Dso,
+                core::ptr::null(),
+                buf.as_mut_ptr(),
+                buf.len(),
+            );
+            assert!(found >= 0, "ancestor RPATH is searched");
+            super::super::dso::close_object(found);
+        }
+    }
+
     /// Loader that refuses everything: the walk must still terminate and
     /// the namespace must still contain the program.
     unsafe fn no_deps(_name: *const c_char, _needed_by: *mut Dso) -> *mut Dso {
