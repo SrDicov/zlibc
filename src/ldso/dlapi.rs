@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn dlerror_returns_once() {
         let _guard = lock();
-        {
+        unsafe {
             assert!(dlerror().is_null(), "no pending error to start");
             set_error(b"boom");
             let first = dlerror();
@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn dlerror_buffer_has_the_pointer_floor() {
         let _guard = lock();
-        {
+        unsafe {
             set_error(b"x");
             let p = dlerror();
             assert!(!p.is_null());
@@ -356,7 +356,7 @@ mod tests {
     #[test]
     fn dlclose_is_a_no_op_for_live_handles() {
         let _guard = lock();
-        {
+        unsafe {
             linkmap::reset_namespace();
             let mut d: Dso = core::mem::zeroed();
             linkmap::set_namespace(&mut d as *mut Dso);
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn dlsym_on_empty_namespace_misses_cleanly() {
         let _guard = lock();
-        {
+        unsafe {
             linkmap::reset_namespace();
             assert!(dlsym(RTLD_DEFAULT, c"nope".as_ptr()).is_null());
             assert!(!dlerror().is_null());
@@ -387,7 +387,7 @@ mod tests {
     #[test]
     fn dlsym_rejects_unknown_handle() {
         let _guard = lock();
-        {
+        unsafe {
             linkmap::reset_namespace();
             let mut d: Dso = core::mem::zeroed();
             linkmap::set_namespace(&mut d as *mut Dso);
