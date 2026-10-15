@@ -411,6 +411,12 @@ mod tests {
     use crate::ldso::testlock::lock;
     use crate::ldso::{AT_BASE, DT_NULL};
 
+    /// NUL-terminated copy of a Rust string, for the `*const c_char`
+    /// entry points.
+    fn c_str(s: &str) -> std::ffi::CString {
+        std::ffi::CString::new(s).unwrap()
+    }
+
     /// Loader that refuses everything: the walk must still terminate and
     /// the namespace must still contain the program.
     unsafe fn no_deps(_name: *const c_char, _needed_by: *mut Dso) -> *mut Dso {
@@ -460,6 +466,30 @@ mod tests {
             // Second call is a no-op: the guard, not a double relocation.
             reloc_all(null_mut(), &mut dso as *mut Dso, true);
             assert_eq!(dso.relocated, 1);
+        }
+    }
+
+    /// The reserved-name table is the whole reason a musl-linked
+    /// binary keeps working: its `DT_NEEDED: libc.so` must resolve to
+    /// *us*, not to a second copy of ourselves. musl matches the
+    /// dot-separated segments of `c.pthread.rt.m.dl.util.xnet.` after a
+    /// leading `lib` (`dynlink.c:1075-1097`), so `libm.so` hits and
+    /// `libfoo.so` must not.
+    #[test]
+    fn reserved_names_resolve_to_the_loader_itself() {
+        for yes in [
+            "libc.so",
+            "libpthread.so",
+            "librt.so",
+            "libm.so",
+            "libdl.so",
+            "libutil.so",
+            "libxnet.so",
+        ] {
+            assert!(unsafe { is_self(c_str(yes).as_ptr()) }, "{yes} is us");
+        }
+        for no in ["libfoo.so", "libc.so.1", "libz.so", "lib", "li", "l", "", "libc"] {
+            assert!(!unsafe { is_self(c_str(no).as_ptr()) }, "{no} is not us");
         }
     }
 
