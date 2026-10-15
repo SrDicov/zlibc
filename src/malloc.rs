@@ -608,16 +608,13 @@ mod tests {
             assert!(o.is_null());
             let o2 = malloc(usize::MAX);
             eprintln!("EDGE malloc(MAX) again = {:p}", o2);
-            assert!(
-                calloc(usize::MAX, 2).is_null(),
-                "calloc = {:p}",
-                calloc(usize::MAX, 2)
-            );
-            assert!(
-                realloc(null_mut(), usize::MAX).is_null(),
-                "realloc = {:p}",
-                realloc(null_mut(), usize::MAX)
-            );
+            assert!(o2.is_null());
+            let c = calloc(usize::MAX, 2);
+            eprintln!("EDGE calloc(MAX,2) = {:p}", c);
+            assert!(c.is_null(), "calloc = {:p}", c);
+            let r = realloc(null_mut(), usize::MAX);
+            eprintln!("EDGE realloc(null,MAX) = {:p}", r);
+            assert!(r.is_null(), "realloc = {:p}", r);
         }
     }
 
@@ -707,7 +704,10 @@ mod tests {
                 eprintln!("CHILD p = {:p}", p);
                 assert!(!p.is_null());
                 free(p);
-                eprintln!("CHILD freed once; second free next");
+                let q = malloc(64);
+                eprintln!("CHILD after one free, reclaim = {:p}", q);
+                free(q);
+                eprintln!("CHILD freeing the same block twice now");
                 free(p);
                 eprintln!("CHILD freed twice, detection missed it");
             }

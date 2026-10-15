@@ -213,6 +213,17 @@ extern "C" fn tlsdesc_static() -> isize {
     }
 }
 
+/// Address of [`tlsdesc_static`], as the `TLSDESC` slot must store it.
+///
+/// One accessor, so production and tests cannot disagree: at `-O2` LLVM
+/// gave the test module its own copy of this one-`ud2` function, and the
+/// identity assert then compared two distinct addresses (release-only
+/// failure). The contract is "the slot holds the static-TLS resolver",
+/// not "equals this particular cast expression".
+fn tlsdesc_static_ptr() -> usize {
+    tlsdesc_static as *const () as usize
+}
+
 // ---- Symbol lookup (musl ldso/dynlink.c:265-351) ----------------------------
 
 /// musl `sysv_lookup` (`dynlink.c:265-277`), reimplemented.
@@ -586,7 +597,7 @@ pub unsafe fn do_relocs(
                         // no allocator until Wave 4.
                         fatal((*dso).name, name, b"dynamic TLSDESC needs allocator");
                     }
-                    let desc: usize = tlsdesc_static as *const () as usize;
+                    let desc: usize = tlsdesc_static_ptr();
                     *addr.add(0) = desc;
                     *addr.add(1) = tls_val.wrapping_sub((*def_dso).tls.offset).wrapping_add(a);
                 }
@@ -853,7 +864,7 @@ mod tests {
                 false,
             )
         };
-        let want_fn: usize = tlsdesc_static as *const () as usize;
+        let want_fn: usize = tlsdesc_static_ptr();
         eprintln!(
             "TLSDESC slot={:x} want_fn={:x} syms={:x} fatal={:x} rtype={}",
             unsafe { *at(base, 0x08) },
