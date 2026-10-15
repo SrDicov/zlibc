@@ -643,13 +643,13 @@ mod tests {
             // opaque so the call is real (see the note above
             // `aligned_body`), not folded to `undef`.
             let o = malloc(black_box(usize::MAX));
-            assert!(o.is_null());
+            assert!(o.is_null(), "malloc(MAX) = {:p}", o);
             let o2 = malloc(black_box(usize::MAX / 2 + 1));
-            assert!(o2.is_null());
+            assert!(o2.is_null(), "malloc(MAX/2+1) = {:p}", o2);
             let c = calloc(black_box(usize::MAX), black_box(2));
-            assert!(c.is_null());
+            assert!(c.is_null(), "calloc(MAX,2) = {:p}", c);
             let r = realloc(null_mut(), black_box(usize::MAX));
-            assert!(r.is_null());
+            assert!(r.is_null(), "realloc(null,MAX) = {:p}", r);
         }
     }
 
@@ -788,9 +788,9 @@ mod tests {
     fn memalign_huge_alignment_fails_clean() {
         unsafe {
             let m = memalign(black_box(usize::MAX), 64);
-            assert!(m.is_null());
+            assert!(m.is_null(), "memalign(MAX,64) = {:p}", m);
             let a = aligned_alloc(64, 64);
-            assert!(!a.is_null());
+            assert!(!a.is_null(), "aligned_alloc(64,64) = {:p}", a);
             free(a);
         }
     }
