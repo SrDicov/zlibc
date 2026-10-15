@@ -18,7 +18,7 @@
 //! `40355569` (2019-02-26), so this shape is the one to mirror.
 
 use core::ffi::c_char;
-use core::ptr::null_mut;
+use core::ptr::{addr_of_mut, null_mut};
 use core::sync::atomic::{AtomicPtr, Ordering};
 
 use super::dso::Dso;
@@ -37,8 +37,8 @@ static SYMS_TAIL: AtomicPtr<Dso> = AtomicPtr::new(null_mut());
 /// object at these instead of `calloc`, deliberately keeping "no
 /// runtime failure path" for the common case (musl:1274-1277); a
 /// failing `calloc` for an app with real deps stays fatal there.
-static NO_DEPS: [*mut Dso; 1] = [null_mut()];
-static BUILTIN_DEPS: [*mut Dso; 2] = [null_mut(), null_mut()];
+static mut NO_DEPS: [*mut Dso; 1] = [null_mut()];
+static mut BUILTIN_DEPS: [*mut Dso; 2] = [null_mut(), null_mut()];
 
 /// Loads one dependency by name, musl `load_library` (`dynlink.c:1062`)
 /// reduced to the contract the walk needs: return the mapped `Dso`
@@ -172,16 +172,16 @@ pub unsafe fn load_direct_deps(p: *mut Dso, load: LoadFn) -> bool {
         // runtime failure path; everything else, a plain library with
         // zero deps included, allocates one terminator slot.
         if is_head && cnt < 2 {
-            //musl hands out `static` storage that is only ever written through
-            // the `*mut` it returns, so `static` (not `static mut`) is
-            // the honest declaration: no aliasing reference exists.
-            (*p).deps = BUILTIN_DEPS.as_ptr().cast_mut();
+            // `addr_of_mut!` rather than `as_ptr()`: the latter creates a shared
+            // reference to mutable static storage. musl hands this
+            // array out the same way — write-only through the pointer.
+            (*p).deps = addr_of_mut!(BUILTIN_DEPS).cast::<*mut Dso>();
         } else {
             let slots = crate::malloc::calloc(cnt + 1, size_of::<*mut Dso>());
             if slots.is_null() {
                 // musl prints and (at startup) keeps going into a NULL
                 // `deps`; we stop before that and report the failure.
-                (*p).deps = NO_DEPS.as_ptr().cast_mut();
+                (*p).deps = addr_of_mut!(NO_DEPS).cast::<*mut Dso>();
                 return false;
             }
             (*p).deps = slots as *mut *mut Dso;
