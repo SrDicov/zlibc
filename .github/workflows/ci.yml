@@ -62,6 +62,9 @@ jobs:
         run: |
           sudo apt-get install -y gdb
           bin=$(echo target/release/deps/zlibc-*.d | head -1); bin=${bin%.d}
+          echo "=== last passing test before the crash (serial order) ==="
+          "$bin" --test-threads=1 --nocapture 2>&1 | grep -a '^test .* ok$' | tail -3 || true
+          echo "=== backtrace ==="
           gdb --batch --ex run --ex bt --args "$bin" --test-threads=1 2>&1 | tail -25 || true
 
       - name: Diagnose release-test crash on failure
