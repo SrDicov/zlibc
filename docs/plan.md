@@ -650,6 +650,33 @@ Toolchain lessons:
 - `addr_of_mut!((*ptr).field)` must not nest an inner `unsafe` (E0745
   temporary); write it bare inside an explicit outer `unsafe` block.
 
+## Fase 0 — saneamiento de infraestructura (ejecutado sobre `ws/6e-1`)
+
+Premisas del plan verificadas contra evidencia antes de actuar:
+
+- El desglose `T:1418 W:199 D:6 R:3 B:14 V:10` es exacto (medido con
+  `nm -D` sobre `/home/dicov/musl/lib/libc.so` 1.2.6 construido
+  localmente; suma 1650). `_dlstart` está en el baseline.
+- Los "10 perdidos" eran en realidad **12**: `ceil/floor/round/trunc/
+  copysign/fabs` (+`f`). Causa raíz probada por bisección: un `T`
+  nuestro + un `W` de compiler_builtins del mismo nombre salen del
+  `-shared --whole-archive` (ld 2.47) como símbolo **LOCAL**, y ningún
+  `--export-dynamic-symbol` ni version-script lo promueve de vuelta.
+  Fix en `tools/link-interp.sh`: localizar (`objcopy -L`) los débiles
+  en sus propios miembros (lista calculada del archive en cada enlace,
+  cero mantenimiento para `sin/cos/...` futuros).
+- `va_trampoline!` (stdio.rs:783) emite `printf/fprintf/snprintf`
+  reales que el gate no contaba: el número honesto era **117**, no 114.
+- `tools/link-interp.sh` (receta única de enlace): weak-dedup +
+  `--version-script` generado del baseline completo (1650 nombres, no
+  caduca) + `_dlstart`; `.dynsym` final: **117/117 dentro del
+  baseline, cero internos Rust** (antes 711 con ~600 con mangling).
+- `tools/symbol-gate.sh`: reparado (`export LC_ALL=C`, baseline sin
+  comentarios, + fuente `va_trampoline!`), ahora **bloqueante**
+  (`FLOOR=117`, `exit 1` si baja o si la extracción sale vacua).
+- CI: el paso de enlace usa `link-interp.sh` + chequeo
+  "dynsym ⊆ baseline". 5/5 gates, 114 tests, clippy, fmt en verde.
+
 ## "100% done" criteria
 
 - All public musl x86_64 symbols present with correct signature/ABI.
