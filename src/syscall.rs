@@ -11,7 +11,6 @@ use core::ffi::c_int;
 pub const SYS_WRITE: usize = 1; // TODO: generate from arch bits/syscall.h
 
 #[cfg(target_arch = "x86_64")]
-#[inline(always)]
 /// Raw 0-arg syscall.
 ///
 /// # Safety
@@ -33,7 +32,6 @@ pub unsafe fn syscall0(n: usize) -> isize {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[inline(always)]
 /// Raw 1-arg syscall.
 ///
 /// # Safety
@@ -55,7 +53,6 @@ pub unsafe fn syscall1(n: usize, a1: usize) -> isize {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[inline(always)]
 /// Raw 2-arg syscall.
 ///
 /// # Safety
@@ -76,7 +73,6 @@ pub unsafe fn syscall2(n: usize, a1: usize, a2: usize) -> isize {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[inline(always)]
 /// Raw 3-arg syscall.
 ///
 /// # Safety
@@ -97,7 +93,6 @@ pub unsafe fn syscall3(n: usize, a1: usize, a2: usize, a3: usize) -> isize {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[inline(always)]
 /// Raw 4-arg syscall.
 ///
 /// # Safety
@@ -118,7 +113,6 @@ pub unsafe fn syscall4(n: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> 
 }
 
 #[cfg(target_arch = "x86_64")]
-#[inline(always)]
 /// Raw 5-arg syscall.
 ///
 /// # Safety
@@ -140,7 +134,6 @@ pub unsafe fn syscall5(n: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5:
 }
 
 #[cfg(target_arch = "x86_64")]
-#[inline(always)]
 /// Raw 6-arg syscall.
 ///
 /// # Safety
