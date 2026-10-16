@@ -142,7 +142,7 @@ jobs:
           components: clippy, rustfmt
 
       - name: Install musl-gcc
-        run: sudo apt-get install -y musl-tools
+        run: sudo apt-get install -y musl-tools strace
 
       - name: Build the linkable libc (cdylib)
         run: cargo build --release --verbose --target x86_64-unknown-linux-musl
@@ -185,3 +185,13 @@ jobs:
         run: |
           out=$(/tmp/zlibc-smoke/hello-a)
           test "$out" = "hello from zlibc 41"
+
+      # Diagnostic on failure only: stage markers show how far the cold
+      # boot got, strace shows the syscall trail to the fault.
+      - name: Diagnose cold boot on failure
+        if: failure()
+        run: |
+          /tmp/zlibc-smoke/hello-a || true
+          echo "=== strace tail ==="
+          strace -f -o /tmp/zlibc-smoke/trace.log /tmp/zlibc-smoke/hello-a || true
+          tail -25 /tmp/zlibc-smoke/trace.log

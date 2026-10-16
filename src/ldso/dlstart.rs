@@ -264,7 +264,9 @@ pub unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usi
 #[no_mangle]
 pub unsafe extern "C" fn _dlstart_boot(sp: *const usize, dynv: *const usize) -> usize {
     unsafe {
+        super::boot::diag_boot(b"dlstart: entered\n");
         let base = _dlstart_c(sp, dynv);
+        super::boot::diag_boot(b"dlstart: self-relocated\n");
         let ldso = core::ptr::addr_of_mut!(super::boot::LDSO);
         (*ldso).base = base as *mut u8;
         (*ldso).dynv = dynv as *mut usize;
@@ -289,8 +291,10 @@ pub unsafe extern "C" fn _dlstart_boot(sp: *const usize, dynv: *const usize) -> 
             }
             i += 2;
         }
+        super::boot::diag_boot(b"dlstart: pass1 done\n");
         let app = core::ptr::addr_of_mut!(super::boot::APP);
         *app = super::boot::app_dso_from_aux(&aux);
+        super::boot::diag_boot(b"dlstart: app built\n");
         let entry =
             super::boot::dynlink_boot(envp_from_sp(sp), &aux, app, super::boot::load_library);
         // Pass 2 (musl's `ldso.relocated = 0` + the step-12 pass,

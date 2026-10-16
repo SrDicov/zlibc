@@ -225,6 +225,7 @@ pub unsafe fn dynlink_boot(
     unsafe {
         // Stage 0: environment and trust level, before anything loads.
         init_loader_state(envp, aux);
+        diag_boot(b"boot: env+secure published\n");
         // Stage 1-2: the namespace starts at the main program.
         linkmap::set_namespace(app);
         // Stage 3: dependencies, breadth-first.
@@ -235,6 +236,7 @@ pub unsafe fn dynlink_boot(
             linkmap::add_syms(p);
             p = (*p).next;
         }
+        diag_boot(b"boot: deps loaded, scope linked\n");
         // Stage 5: everything but the main program, then the main
         // program separately. Its `RELATIVE` entries are already applied
         // by `_dlstart`, so it is the one object relocated with
@@ -245,6 +247,7 @@ pub unsafe fn dynlink_boot(
             q = (*q).next;
         }
         reloc_all(linkmap::head(), app, true);
+        diag_boot(b"boot: relocated, jumping\n");
         // Stage 6: entry point.
         aux[AT_ENTRY]
     }
@@ -602,6 +605,16 @@ unsafe fn search_bare(
             fd = path_open(name, DEFAULT_PATHS.as_ptr() as *const c_char, buf, buf_size);
         }
         fd
+    }
+}
+
+/// DIAG (transient, 6E bring-up): raw `write(2)` marker. Uses the raw
+/// syscall, not `__syscall!`, so it works with `FS_BASE` 0, without
+/// errno, without malloc, without TLS — callable from any boot stage.
+/// libtest captures fd 2 per test, so unit tests stay quiet.
+pub(crate) fn diag_boot(msg: &[u8]) {
+    unsafe {
+        crate::syscall::syscall3(crate::syscall::SYS_WRITE, 2, msg.as_ptr() as usize, msg.len());
     }
 }
 
