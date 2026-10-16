@@ -2043,6 +2043,8 @@ mod tests {
 
     #[test]
     fn tmp_names_are_unique_paths() {
+        // tmpnam/tempnam probe nonexistent paths (ENOENT writes): serialize.
+        let _guard = crate::ldso::testlock::lock();
         unsafe {
             let a = super::tmpnam(null_mut());
             assert!(!a.is_null());

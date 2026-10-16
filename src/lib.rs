@@ -7,6 +7,8 @@
 extern crate std;
 
 pub mod abi;
+#[cfg(target_arch = "x86_64")]
+pub mod dirent;
 pub mod errno;
 #[cfg(target_arch = "x86_64")]
 pub mod exit;
@@ -25,6 +27,8 @@ pub mod mman;
 pub mod net;
 pub mod panic;
 #[cfg(target_arch = "x86_64")]
+pub mod poll;
+#[cfg(target_arch = "x86_64")]
 pub mod process;
 #[cfg(target_arch = "x86_64")]
 pub mod setjmp;
@@ -39,6 +43,8 @@ pub mod stdio;
 pub mod symbols;
 pub mod sync;
 pub mod syscall;
+#[cfg(target_arch = "x86_64")]
+pub mod termios;
 #[cfg(target_arch = "x86_64")]
 pub mod thread;
 #[cfg(target_arch = "x86_64")]

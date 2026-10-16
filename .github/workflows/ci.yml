@@ -53,6 +53,10 @@ jobs:
       # so a value assert is only meaningful serially.
       - name: Test thread (serial)
         run: 'timeout 120 cargo test --verbose -- thread:: errno::tests::errno_is_per_thread validation:: ldso::linkmap:: fcntl::tests::fcntl_dup_and_flags_roundtrip mman::tests::mmap_bad_offset_is_einval unistd::tests::pause_returns_eintr_after_signal --test-threads=1'
+      # Quiescence-only tests (#[ignore]d: they assert a globally quiet
+      # fallback cell no parallel run can promise). Serial, alone.
+      - name: Test quiescence (serial, ignored-only)
+        run: 'timeout 120 cargo test --verbose -- --ignored --test-threads=1'
       # Everything above is -O0 codegen. Release is where LLVM first sees
       # the byte-loops and the inline asm: run the whole suite optimized,
       # serially, so optimization regressions surface here and not at the
