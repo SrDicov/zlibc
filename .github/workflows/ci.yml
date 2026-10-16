@@ -152,6 +152,12 @@ jobs:
           a=$(echo target/x86_64-unknown-linux-musl/release/libzlibc.a)
           test -f "$a"
           mkdir -p /tmp/zlibc-smoke
+          echo "== archive members =="
+          ar t "$a" | head -8
+          echo "== _dlstart in archive (want: T) =="
+          nm --defined-only "$a" 2>/dev/null | grep -w _dlstart | head -4
+          echo "== global text symbols in archive (sample) =="
+          nm --defined-only "$a" 2>/dev/null | grep ' T ' | head -8
           # --whole-archive: an archive only donates members that resolve
           # an undefined symbol, and a freestanding libc has almost no
           # undefined references to trigger on (musl links loose objects
