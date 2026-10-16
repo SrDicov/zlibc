@@ -733,6 +733,25 @@ checks van tras `#[inline(never)]` opacos. El producto nunca lo sufre
 (`#[no_mangle]` es frontera opaca), solo los tests. Debug en O0 jamás
 lo muestra: el fallo solo existe en release.
 
+## Ola 7B (subagente `cat jam`, `ws/6e-1`): `dtoa` + `lockfile`
+
+Entregado y verde (9 gates + 134/132 tests + CI): `src/stdio/dtoa.rs`
+(`fmt_f64/f80_bits` puros, medio-verificados contra `std::format`,
+byte-idéntico a glibc en boot real incl. `%Lf`/`%a`/inf/nan) y
+`src/stdio/lockfile.rs` (`flockfile`×3 + `__lockfile` privado, futex
++ `gettid` crudo, sin lista `stdio_locks`). Contador: **128/1650
+(7,8 %)**. Cableado mío: lectores `ap.fp_bits/stk16_bytes`, brazo
+float con scratch 2K (techo documentado: truncado pasado 2K),
+`File.lock/lockcount` en el esqueleto previo para que el agente
+compile standalone.
+
+Reglas para próximas órdenes: (1) si el entregable necesita campos o
+métodos del padre, el esqueleto los pone ANTES de disparar — jamás
+después; (2) al cambiar un contrato (skip→emit), actualizar sus tests
+en el mismo edit o el rojo es tuyo, no del agente; (3) todo literal
+numérico en tests/vector es presa de clippy (`PI`, precisión
+excesiva, `div_ceil`, `%2`) — vectores via `from_bits`/consts.
+
 ## "100% done" criteria
 
 - All public musl x86_64 symbols present with correct signature/ABI.
