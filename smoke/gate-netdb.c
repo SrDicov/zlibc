@@ -1,7 +1,6 @@
 // Gate Ola 10 (netdb/passwd/sysconf): resolver helpers, user database,
 // resource limits and crypt on a real boot.
 #include <arpa/inet.h>
-#include <crypt.h>
 #include <grp.h>
 #include <net/if.h>
 #include <netdb.h>
@@ -11,6 +10,9 @@
 #include <sys/resource.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+
+// musl's crypt.h is absent from some toolchains; declare directly.
+char *crypt(const char *, const char *);
 
 int main(void) {
     // Byte order + address parse roundtrip.
