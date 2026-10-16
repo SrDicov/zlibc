@@ -29,7 +29,7 @@ use super::reloc::do_relocs;
 use super::{
     AT_EGID, AT_ENTRY, AT_EUID, AT_GID, AT_PHDR, AT_PHENT, AT_PHNUM, AT_SECURE, AT_UID, AUX_CNT,
     DT_JMPREL, DT_PLTREL, DT_PLTRELSZ, DT_REL, DT_RELA, DT_RELASZ, DT_RELR, DT_RELRSZ, DT_RELSZ,
-    DYN_CNT, PT_DYNAMIC, PT_INTERP, PT_TLS,
+    DYN_CNT, PT_DYNAMIC, PT_PHDR, PT_TLS,
 };
 
 /// musl `reloc_all` (`dynlink.c:1412-1440`) for one object: PLT, then
@@ -121,40 +121,48 @@ pub unsafe fn reloc_all(head: *mut Dso, dso: *mut Dso, skip_relative: bool) {
 pub unsafe fn app_dso_from_aux(aux: &[usize; AUX_CNT]) -> Dso {
     unsafe {
         let mut d: Dso = core::mem::zeroed();
-        let phdr = aux[AT_PHDR] as *const super::Elf64Phdr;
+        let phdr = aux[AT_PHDR] as *const crate::ldso::Elf64Phdr;
         let phnum = aux[AT_PHNUM];
         let phent = aux[AT_PHENT];
-        d.phdr = phdr as *mut super::Elf64Phdr;
+        d.phdr = phdr as *mut crate::ldso::Elf64Phdr;
         d.phnum = phnum as c_int;
         d.phentsize = phent;
-        // Bias: `_DYNAMIC` is where `PT_DYNAMIC` lands once biased, so the
-        // scan finds it. A `PT_INTERP` base is already known (AT_BASE) and
-        // does not describe the program.
-        let mut base = aux[crate::ldso::AT_BASE];
-        if base == 0 {
-            let mut k = phnum;
-            while k > 0 {
-                k -= 1;
-                let ph = phdr.wrapping_byte_add(k * phent).cast::<super::Elf64Phdr>();
-                if (*ph).p_type == PT_INTERP {
-                    base = aux[AT_PHDR].wrapping_sub((*ph).p_vaddr as usize);
-                    break;
-                }
-            }
-        }
-        d.base = base as *mut u8;
-        d.kernel_mapped = 1;
+        // musl `dynlink.c:1847`: the app's load base comes from the
+        // PT_PHDR entry (`AT_PHDR - p_vaddr`). `AT_BASE` is the
+        // *loader's* base and never the program's: using it here made
+        // `app.dynv` point into our own `.text`, so `decode_dyn`
+        // harvested garbage tags and `do_relocs` dereferenced junk. The
+        // interpreted-ldso-as-main path reuses `ldso.phdr` (musl
+        // `__dls2`) and never reaches here looking for a base.
+        let mut base = 0usize;
+        let mut tls_image = 0usize;
         let mut i = 0usize;
         while i < phnum {
-            let ph = phdr.wrapping_byte_add(i * phent).cast::<super::Elf64Phdr>();
+            let ph = phdr.wrapping_byte_add(i * phent).cast::<crate::ldso::Elf64Phdr>();
+            match (*ph).p_type {
+                PT_PHDR => {
+                    base = aux[AT_PHDR].wrapping_sub((*ph).p_vaddr as usize);
+                }
+                PT_TLS => {
+                    tls_image = (*ph).p_vaddr as usize;
+                    d.tls.len = (*ph).p_filesz as usize;
+                    d.tls.size = (*ph).p_memsz as usize;
+                    d.tls.align = (*ph).p_align as usize;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        d.base = base as *mut u8;
+        if d.tls.size != 0 {
+            d.tls.image = d.base.wrapping_add(tls_image) as *mut core::ffi::c_void;
+        }
+        d.kernel_mapped = 1;
+        i = 0;
+        while i < phnum {
+            let ph = phdr.wrapping_byte_add(i * phent).cast::<crate::ldso::Elf64Phdr>();
             if (*ph).p_type == PT_DYNAMIC {
                 d.dynv = d.base.wrapping_add((*ph).p_vaddr as usize) as *mut usize;
-            }
-            if (*ph).p_type == PT_TLS {
-                d.tls.image = d.base.wrapping_add((*ph).p_vaddr as usize) as *mut core::ffi::c_void;
-                d.tls.len = (*ph).p_filesz as usize;
-                d.tls.size = (*ph).p_memsz as usize;
-                d.tls.align = (*ph).p_align as usize;
             }
             i += 1;
         }
@@ -243,9 +251,12 @@ pub unsafe fn dynlink_boot(
         // `skip_relative`.
         let mut q = (*app).next;
         while !q.is_null() {
+            diag_boot(b"boot: reloc dep ");
+            diag_hex(b"q", q as usize);
             reloc_all(linkmap::head(), q, false);
             q = (*q).next;
         }
+        diag_boot(b"boot: reloc app\n");
         reloc_all(linkmap::head(), app, true);
         diag_boot(b"boot: relocated, jumping\n");
         // Stage 6: entry point.
@@ -255,6 +266,7 @@ pub unsafe fn dynlink_boot(
 
 /// The loader's own shared object (musl `ldso`, `dynlink.c:145-158`).
 /// Its `name` is what a `DT_NEEDED: libc.so` must resolve to.
+#[no_mangle]
 pub static mut LDSO: Dso = unsafe { core::mem::zeroed() };
 
 /// musl's reserved self-names (`dynlink.c:1077-1079`): after a leading
@@ -1097,4 +1109,77 @@ mod tests {
             assert_eq!(d.kernel_mapped, 1);
         }
     }
+
+    /// Regression guard for the 6E cold-boot family: `app.base` comes
+    /// from the **PT_PHDR** entry (`AT_PHDR - phdr->p_vaddr`, musl
+    /// `dynlink.c:1847`), never from `AT_BASE` — that register holds the
+    /// *interpreter's* base. A base taken from `AT_BASE` pointed `dynv`
+    /// at our own `.text` and let `do_relocs` dereference garbage
+    /// (observed: the first non-RELATIVE entry read
+    /// `r_off = 0x8000f8369003`).
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn app_base_comes_from_pt_phdr_not_at_base() {
+        let _guard = lock();
+        unsafe {
+            // Array of three phdrs lands at mem+0x40; the PT_PHDR entry
+            // carries its own p_vaddr so `base = AT_PHDR - p_vaddr`
+            // recovers `mem`. PT_DYNAMIC's p_vaddr points back inside
+            // the buffer so `decode_dyn` reads real memory.
+            let mut mem = [0u8; 320];
+            let base = mem.as_mut_ptr();
+            let phdrs = [
+                crate::ldso::Elf64Phdr {
+                    p_type: PT_PHDR,
+                    p_flags: 4,
+                    p_offset: 0x10,
+                    p_vaddr: 0x40,
+                    p_paddr: 0x40,
+                    p_filesz: 3 * size_of::<crate::ldso::Elf64Phdr>() as u64,
+                    p_memsz: 3 * size_of::<crate::ldso::Elf64Phdr>() as u64,
+                    p_align: 8,
+                },
+                crate::ldso::Elf64Phdr {
+                    p_type: PT_DYNAMIC,
+                    p_flags: 6,
+                    p_offset: 0x80,
+                    p_vaddr: 0x100,
+                    p_paddr: 0x100,
+                    p_filesz: 16,
+                    p_memsz: 16,
+                    p_align: 8,
+                },
+                crate::ldso::Elf64Phdr {
+                    p_type: 0,
+                    p_flags: 0,
+                    p_offset: 0,
+                    p_vaddr: 0,
+                    p_paddr: 0,
+                    p_filesz: 0,
+                    p_memsz: 0,
+                    p_align: 0,
+                },
+            ];
+            base.add(0x40)
+                .cast::<crate::ldso::Elf64Phdr>()
+                .copy_from_nonoverlapping(phdrs.as_ptr(), 3);
+            // A DT_NULL dynamic vector at mem+0x100 keeps decode_dyn on
+            // real memory while proving `dynv` was resolved by PT_DYNAMIC.
+            let dynv = base.add(0x100) as *mut usize;
+            dynv.add(0).write(DT_NULL);
+            dynv.add(1).write(0);
+            let mut aux = [0usize; AUX_CNT];
+            aux[AT_PHDR] = base.wrapping_add(0x40) as usize;
+            aux[AT_PHNUM] = 3;
+            aux[AT_PHENT] = size_of::<crate::ldso::Elf64Phdr>();
+            aux[crate::ldso::AT_BASE] = 0x5d00_usize; // loader's base: must NOT be used
+            let d = app_dso_from_aux(&aux);
+            assert_eq!(d.base, base, "base from PT_PHDR, not AT_BASE");
+            assert_eq!(d.dynv as *mut u8, base.add(0x100));
+            assert!(d.tls.image.is_null(), "no PT_TLS in this image");
+        }
+    }
 }
+
+#[cfg(target_arch = "x86_64")]
+core::arch::global_asm!(".hidden LDSO");

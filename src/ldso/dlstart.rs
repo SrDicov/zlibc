@@ -314,10 +314,16 @@ pub unsafe extern "C" fn _dlstart_boot(sp: *const usize, dynv: *const usize) -> 
 /// must contain no indirect transfer. `#[inline(never)]` keeps it
 /// that way (inlining would drag post-reloc GOT calls back in).
 #[cfg(all(not(test), target_arch = "x86_64"))]
+#[unsafe(naked)]
+extern "C" fn ldso_addr() -> *mut super::dso::Dso {
+    core::arch::naked_asm!("lea rax, [rip + LDSO]", "ret")
+}
+
+#[cfg(all(not(test), target_arch = "x86_64"))]
 #[inline(never)]
 unsafe fn _dlstart_post(sp: *const usize, dynv: *const usize, base: usize) -> usize {
     unsafe {
-        let ldso = core::ptr::addr_of_mut!(super::boot::LDSO);
+        let ldso = ldso_addr();
         (*ldso).base = base as *mut u8;
         (*ldso).dynv = dynv as *mut usize;
         super::dso::decode_dyn(ldso);
