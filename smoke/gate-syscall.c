@@ -2,6 +2,7 @@
 // boot, including errno paths. Prints one line on success.
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -73,6 +74,38 @@ int main(void) {
     int c = getopt(3, av, "ab:");
     if (c != 'b') {
         printf("getopt fail %d\n", c);
+        return 1;
+    }
+    // Ola 9B: env + conversions + rand.
+    if (setenv("ZLIBC_GATE", "42", 1) != 0) {
+        printf("setenv fail\n");
+        return 1;
+    }
+    const char *v = getenv("ZLIBC_GATE");
+    if (!v || v[0] != '4' || v[1] != '2' || v[2] != 0) {
+        printf("getenv fail\n");
+        return 1;
+    }
+    if (unsetenv("ZLIBC_GATE") != 0 || getenv("ZLIBC_GATE") != 0) {
+        printf("unsetenv fail\n");
+        return 1;
+    }
+    char *end = 0;
+    if (strtol("  -0x10x", &end, 0) != -16 || !end || end[0] != 'x') {
+        printf("strtol fail\n");
+        return 1;
+    }
+    if (strtod("3.14", &end) < 3.13 || !end || end[0] != 0) {
+        printf("strtod fail\n");
+        return 1;
+    }
+    srand(1);
+    if (rand() < 0) {
+        printf("rand fail\n");
+        return 1;
+    }
+    if (abs(-5) != 5 || labs(-7) != 7) {
+        printf("abs fail\n");
         return 1;
     }
     printf("syscall ok\n");

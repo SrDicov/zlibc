@@ -506,6 +506,8 @@ mod tests {
 
     #[test]
     fn sendfile_file_to_file() {
+        // Reads errno on the old-kernel path: serialize (see testlock docs).
+        let _guard = crate::ldso::testlock::lock();
         let src = tmp_cstr("sfs");
         let dst = tmp_cstr("sfd");
         let msg = b"sendfile-8e2-payload";
