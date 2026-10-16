@@ -712,6 +712,27 @@ Diferido con dueño: `DT_FINI*` (con un `dlclose` con dientes),
 rollback de `dlopen` fallido (sin unmap; el reintento lo encuentra
 cargado), `preinit`, condvar en vez de spin para ctores contenciosos.
 
+## Ola 7A (subagente `cat jam #1`, `ws/6e-1`): subsistema `exit`
+
+Entregado y verde (8/8 smokes + 121/119 tests + CI): `src/exit/mod.rs`
+(`abort` por syscalls crudos con `tkill=200` —el subagente corrigió mi
+`234`—, `_Exit`, `exit`/`quick_exit` mudados de `start.rs` con su
+trampa de recursión, `atexit`/`at_quick_exit`/`__cxa_atexit` con bloque
+estático de 32 + cadena `calloc`, `__cxa_finalize` vacío, `_exit` débil;
+`gate-exit` prueba 42/43/134 en boot real). Contador: **125/1650
+(7,6 %)**. Lecciones para las próximas órdenes: verificar cada número
+de syscall contra `bits/syscall.h` (no fiarse del prompt), y NO
+exportar lo que no esté en el baseline (`__funcs_on_exit` quedó
+privado; `__cxa_finalize` sí es baseline).
+
+REGLA para tests con estado global y latch: con todo el ciclo de vida
+inline en un cuerpo, release pliega el check post-drain contra un
+modelo rancio del flag (el store desaparece de la copia inlineada;
+`black_box` NO lo impide — no es barrera de valores). Los drains y
+checks van tras `#[inline(never)]` opacos. El producto nunca lo sufre
+(`#[no_mangle]` es frontera opaca), solo los tests. Debug en O0 jamás
+lo muestra: el fallo solo existe en release.
+
 ## "100% done" criteria
 
 - All public musl x86_64 symbols present with correct signature/ABI.
