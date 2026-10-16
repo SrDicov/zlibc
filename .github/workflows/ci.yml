@@ -195,7 +195,7 @@ jobs:
           components: clippy, rustfmt
 
       - name: Install musl-gcc
-        run: sudo apt-get install -y musl-tools strace
+        run: sudo apt-get install -y musl-tools strace gdb
 
       - name: Build the linkable libc (cdylib)
         run: cargo build --release --verbose --target x86_64-unknown-linux-musl
@@ -273,6 +273,6 @@ jobs:
           strace -f -o /tmp/zlibc-smoke/trace.log /tmp/zlibc-smoke/hello-a || true
           tail -25 /tmp/zlibc-smoke/trace.log
           echo "=== gdb backtrace (which instruction faults?) ==="
-          gdb --batch --ex run --ex bt --args /tmp/zlibc-smoke/hello-a 2>&1 | tail -20 || true
+          gdb --batch --ex run --ex bt --ex 'info registers rip rsp rdi rsi rax rbx' --ex 'x/i $pc' --args /tmp/zlibc-smoke/hello-a 2>&1 | tail -30 || true
           echo "=== section map around the fault addr ==="
           readelf -SW /tmp/zlibc-smoke/ld-musl-x86_64.so.1 | grep -E 'Name|\.text|\.plt|\.got|\.rodata|\.data|\.dynamic' | head -12
