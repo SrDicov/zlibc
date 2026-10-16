@@ -138,7 +138,9 @@ pub unsafe fn app_dso_from_aux(aux: &[usize; AUX_CNT]) -> Dso {
         let mut tls_image = 0usize;
         let mut i = 0usize;
         while i < phnum {
-            let ph = phdr.wrapping_byte_add(i * phent).cast::<crate::ldso::Elf64Phdr>();
+            let ph = phdr
+                .wrapping_byte_add(i * phent)
+                .cast::<crate::ldso::Elf64Phdr>();
             match (*ph).p_type {
                 PT_PHDR => {
                     base = aux[AT_PHDR].wrapping_sub((*ph).p_vaddr as usize);
@@ -160,7 +162,9 @@ pub unsafe fn app_dso_from_aux(aux: &[usize; AUX_CNT]) -> Dso {
         d.kernel_mapped = 1;
         i = 0;
         while i < phnum {
-            let ph = phdr.wrapping_byte_add(i * phent).cast::<crate::ldso::Elf64Phdr>();
+            let ph = phdr
+                .wrapping_byte_add(i * phent)
+                .cast::<crate::ldso::Elf64Phdr>();
             if (*ph).p_type == PT_DYNAMIC {
                 d.dynv = d.base.wrapping_add((*ph).p_vaddr as usize) as *mut usize;
             }

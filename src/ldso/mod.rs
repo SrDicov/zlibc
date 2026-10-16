@@ -115,6 +115,7 @@ pub const PT_DYNAMIC: u32 = 2;
 /// path, i.e. which dynamic linker asked for this image.
 #[cfg(target_arch = "x86_64")]
 pub const PT_INTERP: u32 = 3;
+pub const PT_PHDR: u32 = 6;
 /// musl `PT_TLS` (musl `include/elf.h:608`): the thread-local template.
 #[cfg(target_arch = "x86_64")]
 pub const PT_TLS: u32 = 7;
