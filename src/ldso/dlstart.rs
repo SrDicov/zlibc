@@ -61,7 +61,9 @@ pub(crate) unsafe fn envp_from_sp(sp: *const usize) -> *mut *mut core::ffi::c_ch
 
 pub(crate) unsafe fn find_auxv(sp: *const usize) -> *const usize {
     unsafe {
+        super::boot::diag_hex(b"sp=", sp as usize);
         let argc = sp.read();
+        super::boot::diag_hex(b"argc=", argc);
         let argv = sp.add(1) as *const *const u8;
         let mut i = argc + 1;
         while !(*argv.add(i)).is_null() {
