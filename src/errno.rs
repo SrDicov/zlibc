@@ -142,6 +142,9 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn errno_is_per_thread_with_global_fallback() {
+        // Global fallback cell is shared with every errno-setting test:
+        // serialize like the ldso suite does (see testlock docs).
+        let _guard = crate::ldso::testlock::lock();
         // Harness thread is foreign (glibc owns its FS): global cell.
         let mine = unsafe { super::__errno_location() };
         assert!(!mine.is_null());

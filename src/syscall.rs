@@ -263,6 +263,8 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn errno_aliases_share_one_cell() {
+        // syscall_ret(-2) stores ENOENT in the shared fallback cell.
+        let _guard = crate::ldso::testlock::lock();
         extern "C" {
             fn ___errno_location() -> *mut core::ffi::c_int;
         }

@@ -174,6 +174,8 @@ mod tests {
 
     #[test]
     fn open_write_read_close_roundtrip() {
+        // Opens a missing path (ENOENT into the shared fallback cell).
+        let _guard = crate::ldso::testlock::lock();
         let path = tmp_cstr("rw");
         unsafe {
             // creat(2) covers the O_WRONLY|O_CREAT|O_TRUNC shape.
