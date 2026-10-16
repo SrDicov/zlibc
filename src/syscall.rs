@@ -19,6 +19,7 @@ pub const SYS_WRITE: usize = 1; // TODO: generate from arch bits/syscall.h
 /// Executes the `syscall` instruction with the given number. The caller
 /// must ensure `n` is a valid syscall number and that entering the
 /// kernel with no arguments is sound (no memory is touched by this).
+#[inline(always)]
 pub unsafe fn syscall0(n: usize) -> isize {
     let ret: isize;
     unsafe {
@@ -39,6 +40,7 @@ pub unsafe fn syscall0(n: usize) -> isize {
 ///
 /// Like [`syscall0`]; additionally `a1` is passed in `rdi`, so the
 /// caller must ensure the callee may legally observe that word.
+#[inline(always)]
 pub unsafe fn syscall1(n: usize, a1: usize) -> isize {
     let ret: isize;
     unsafe {
@@ -59,6 +61,7 @@ pub unsafe fn syscall1(n: usize, a1: usize) -> isize {
 /// # Safety
 ///
 /// Like [`syscall1`]; `a1`/`a2` go in `rdi`/`rsi`.
+#[inline(always)]
 pub unsafe fn syscall2(n: usize, a1: usize, a2: usize) -> isize {
     let ret: isize;
     unsafe {
@@ -79,6 +82,7 @@ pub unsafe fn syscall2(n: usize, a1: usize, a2: usize) -> isize {
 /// # Safety
 ///
 /// Like [`syscall1`]; `a1`/`a2`/`a3` go in `rdi`/`rsi`/`rdx`.
+#[inline(always)]
 pub unsafe fn syscall3(n: usize, a1: usize, a2: usize, a3: usize) -> isize {
     let ret: isize;
     unsafe {
@@ -99,6 +103,7 @@ pub unsafe fn syscall3(n: usize, a1: usize, a2: usize, a3: usize) -> isize {
 /// # Safety
 ///
 /// Like [`syscall1`]; `a1`/`a2`/`a3`/`a4` go in `rdi`/`rsi`/`rdx`/`r10`.
+#[inline(always)]
 pub unsafe fn syscall4(n: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> isize {
     let ret: isize;
     unsafe {
@@ -120,6 +125,7 @@ pub unsafe fn syscall4(n: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> 
 ///
 /// Like [`syscall1`]; `a1`/`a2`/`a3`/`a4`/`a5` go in
 /// `rdi`/`rsi`/`rdx`/`r10`/`r8`.
+#[inline(always)]
 pub unsafe fn syscall5(n: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize) -> isize {
     let ret: isize;
     unsafe {
@@ -141,6 +147,7 @@ pub unsafe fn syscall5(n: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5:
 ///
 /// Like [`syscall1`]; `a1`/`a2`/`a3`/`a4`/`a5`/`a6` go in
 /// `rdi`/`rsi`/`rdx`/`r10`/`r8`/`r9`.
+#[inline(always)]
 pub unsafe fn syscall6(
     n: usize,
     a1: usize,

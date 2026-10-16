@@ -255,13 +255,26 @@ jobs:
           for f in _dlstart _dlstart_boot _dlstart_c find_auxv relocate_self zero_words diag_boot diag_hex diag_raw; do
             sym=$(echo "$names" | grep -x "$f" | head -1)
             if [ -z "$sym" ]; then sym=$(echo "$names" | grep "$f" | head -1); fi
-            if [ -z "$sym" ]; then echo "::error pre-reloc fn $f unresolvable (gate would be vacuous)"; fail_pre=1; continue; fi
+            # Skeleton (_dlstart, _dlstart_boot, _dlstart_c) must resolve:
+            # no_mangle x2 + inline(never) guarantee emission. Leaves may
+            # legitimately vanish (inlined into a scanned host, whose dump
+            # then carries their transfers); skipping them is sound.
+            if [ -z "$sym" ]; then
+              case "$f" in
+                _dlstart|_dlstart_boot|_dlstart_c) echo "::error pre-reloc fn $f unresolvable (gate would be vacuous)"; fail_pre=1;;
+              esac
+              continue
+            fi
             hits=$(objdump -d --disassemble="$sym" "$so" | grep -E '@plt|@GOTPCREL|call\s+\*|jmp\s+\*|callq|jmpq' || true)
+            # `_dlstart` ends in the musl-shape tail jump to the loaded
+            # entry (`jmp *%rax`, post-boot, GOT valid): the one legal
+            # indirect transfer in the pre-reloc set.
+            if [ "$f" = _dlstart ]; then hits=$(echo "$hits" | grep -v 'jmp.*\*%rax' || true); fi
             if [ -n "$hits" ]; then echo "== $f ($sym) =="; echo "$hits" | head -8; fail_pre=1; fi
           done
           test "$fail_pre" = 0
           echo "== GOT-filling relocs (want: only RELATIVE, no GLOB_DAT pre-reloc hazard) =="
-          readelf -rW "$so" | awk '$3 ~ /GLOB_DAT|JUMP_SLOT/ {print}' | head -20
+          readelf -rW "$so" | awk '$3 ~ /GLOB_DAT|JUMP_SLOT/ {print}'
           echo "== RELATIVE count =="
           readelf -rW "$so" | grep -c RELATIVE
           echo "== hello's view of libc =="
