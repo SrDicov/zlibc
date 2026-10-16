@@ -287,6 +287,33 @@ jobs:
           out=$(/tmp/zlibc-smoke/hello-a)
           test "$out" = "hello from zlibc 41"
 
+      - name: Build and run gate-tls (PT_TLS, initial-exec __thread)
+        run: |
+          set -e
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc smoke/gate-tls.c -o /tmp/zlibc-smoke/gate-tls -Wl,--dynamic-linker,$so
+          out=$(/tmp/zlibc-smoke/gate-tls)
+          test "$out" = "tls ok"
+          echo "gate-tls ran: $out"
+
+      - name: Build and run gate-pthread (create/mutex/join)
+        run: |
+          set -e
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc smoke/gate-pthread.c -o /tmp/zlibc-smoke/gate-pthread -Wl,--dynamic-linker,$so
+          out=$(timeout 10 /tmp/zlibc-smoke/gate-pthread)
+          test "$out" = "pth ok"
+          echo "gate-pthread ran: $out"
+
+      - name: Build and run gate-copy (R_X86_64_COPY of stdout)
+        run: |
+          set -e
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc smoke/gate-copy.c -o /tmp/zlibc-smoke/gate-copy -Wl,--dynamic-linker,$so
+          out=$(/tmp/zlibc-smoke/gate-copy)
+          test "$out" = "copy ok"
+          echo "gate-copy ran: $out"
+
       # Diagnostic on failure only: stage markers show how far the cold
       # boot got, strace shows the syscall trail to the fault.
       - name: Build and run gate-deps (DT_NEEDED, own libmine.so)
