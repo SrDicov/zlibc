@@ -14,7 +14,7 @@
 
 use core::ffi::{c_char, c_int, c_long, c_void};
 
-use crate::errno::{__errno_location, errno_load, errno_store};
+use crate::errno::{__errno_location, errno_store};
 use crate::syscall::{syscall3, syscall_ret};
 
 // ---- Syscalls (musl arch/x86_64/bits/syscall.h.in) --------------------------
@@ -32,6 +32,8 @@ const O_PATH: c_int = 0o10000000;
 const EBADF: c_int = 9;
 #[cfg(target_arch = "x86_64")]
 const ENOENT: c_int = 2;
+#[cfg(target_arch = "x86_64")]
+const ENOMEM: c_int = 12;
 #[cfg(target_arch = "x86_64")]
 const ENOTDIR: c_int = 20;
 #[cfg(target_arch = "x86_64")]
@@ -205,15 +207,17 @@ pub unsafe extern "C" fn readdir_r(
     result: *mut *mut Dirent,
 ) -> c_int {
     unsafe {
-        let saved = errno_load(__errno_location());
-        errno_store(__errno_location(), 0);
-        let de = readdir_raw(dir);
-        let err = errno_load(__errno_location());
+        // Error state rides an out-param, not the errno cell: under
+        // libtest threads the process-global fallback cell is shared,
+        // so musl's clear-and-reread protocol can observe another
+        // thread's error here (observed: stale ENOENT at end-of-dir).
+        // Production threads have private cells and see identical
+        // values either way.
+        let mut err = 0 as c_int;
+        let de = readdir_raw_err(dir, &mut err);
         if err != 0 {
-            errno_store(__errno_location(), saved);
             return err;
         }
-        errno_store(__errno_location(), saved);
         if de.is_null() {
             *result = core::ptr::null_mut();
         } else {
@@ -225,6 +229,39 @@ pub unsafe extern "C" fn readdir_r(
             *result = buf;
         }
         0
+    }
+}
+
+/// [`readdir_raw`] plus an error out-param (`0` end-of-stream, else the
+/// errno). Lets [`readdir_r`] report failures without reading the
+/// (possibly shared) errno cell.
+///
+/// # Safety
+///
+/// Same contract as [`readdir_raw`]; `err` must be writable.
+#[cfg(target_arch = "x86_64")]
+unsafe fn readdir_raw_err(dir: *mut Dir, err: *mut c_int) -> *mut Dirent {
+    unsafe {
+        if (*dir).buf_pos >= (*dir).buf_end {
+            let len = syscall3(
+                SYS_GETDENTS64,
+                (*dir).fd as usize,
+                (*dir).buf.as_mut_ptr() as usize,
+                (*dir).buf.len(),
+            );
+            if len <= 0 {
+                if len < 0 && len != -(ENOENT as isize) {
+                    *err = (-len) as c_int;
+                }
+                return core::ptr::null_mut();
+            }
+            (*dir).buf_end = len as c_int;
+            (*dir).buf_pos = 0;
+        }
+        let de = (*dir).buf.as_mut_ptr().add((*dir).buf_pos as usize) as *mut Dirent;
+        (*dir).buf_pos = (*dir).buf_pos.wrapping_add((*de).d_reclen as c_int);
+        (*dir).tell = (*de).d_off;
+        de
     }
 }
 
@@ -474,34 +511,35 @@ pub unsafe extern "C" fn scandir(
     compar: Option<unsafe extern "C" fn(*const *const Dirent, *const *const Dirent) -> c_int>,
 ) -> c_int {
     unsafe {
-        let old_errno = errno_load(__errno_location());
         let d = opendir(path);
         if d.is_null() {
             return -1;
         }
+        // Fill errors ride an out-param, not the errno cell: under
+        // shared-cell threads a stale value here fails successful scans
+        // (same class as the old readdir_r protocol, now fixed there).
+        let mut err = 0 as c_int;
         let mut names: *mut *mut Dirent = core::ptr::null_mut();
         let mut cnt: usize = 0;
         let mut len: usize = 0;
         loop {
-            errno_store(__errno_location(), 0);
-            let de = readdir_raw(d);
+            let de = readdir_raw_err(d, &mut err);
             if de.is_null() {
                 break;
             }
             if let Some(sel) = sel {
-                errno_store(__errno_location(), old_errno);
                 if sel(de as *const Dirent) == 0 {
                     continue;
                 }
             }
             if cnt >= INT_MAX as usize {
-                errno_store(__errno_location(), EOVERFLOW);
+                err = EOVERFLOW;
                 break;
             }
             if cnt >= len {
                 len = len.wrapping_mul(2).wrapping_add(1);
                 if len > usize::MAX / core::mem::size_of::<*mut Dirent>() {
-                    errno_store(__errno_location(), EOVERFLOW);
+                    err = EOVERFLOW;
                     break;
                 }
                 let tmp = crate::malloc::realloc(
@@ -509,12 +547,14 @@ pub unsafe extern "C" fn scandir(
                     len.wrapping_mul(core::mem::size_of::<*mut Dirent>()),
                 ) as *mut *mut Dirent;
                 if tmp.is_null() {
+                    err = ENOMEM;
                     break;
                 }
                 names = tmp;
             }
             let cp = crate::malloc::malloc((*de).d_reclen as usize) as *mut Dirent;
             if cp.is_null() {
+                err = ENOMEM;
                 break;
             }
             crate::mem::memcpy(
@@ -525,7 +565,6 @@ pub unsafe extern "C" fn scandir(
             *names.add(cnt) = cp;
             cnt = cnt.wrapping_add(1);
         }
-        let err = errno_load(__errno_location());
         closedir(d);
         if err != 0 {
             if !names.is_null() {
@@ -538,7 +577,6 @@ pub unsafe extern "C" fn scandir(
             errno_store(__errno_location(), err);
             return -1;
         }
-        errno_store(__errno_location(), old_errno);
         if let Some(cmp) = compar {
             let mut i: usize = 0;
             while i < cnt {
@@ -569,6 +607,7 @@ pub unsafe extern "C" fn scandir(
 #[cfg(target_arch = "x86_64")]
 mod tests {
     use super::*;
+    use crate::errno::errno_load;
     use core::sync::atomic::{AtomicU64, Ordering};
     use std::string::{String, ToString};
     use std::vec::Vec;

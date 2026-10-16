@@ -1266,23 +1266,12 @@ mod tests {
         assert!(st.success());
     }
 
-    #[test]
-    fn wait3_reports_rusage() {
-        let _guard = crate::ldso::testlock::lock();
-        unsafe {
-            let pid = fork();
-            assert!(pid >= 0);
-            if pid == 0 {
-                child_halt(9);
-            }
-            let mut status = 0;
-            let mut ru: RUsage = core::mem::zeroed();
-            assert_eq!(wait3(&mut status, 0, &mut ru), pid);
-            assert!(wifexited(status));
-            assert_eq!(wexitstatus(status), 9);
-        }
-    }
-
+    // NOTE: no direct wait3() test here by design. wait3() waits for ANY
+    // child, so in a parallel forking suite it harvests siblings' children
+    // (observed: reaped pid != ours; also starves std::process::Command's
+    // internal waitpid with ECHILD). Coverage: wait4_targets_one_pid checks
+    // rusage via specific-pid wait4, and wait_and_wait3_under_empty_table
+    // exercises wait3() inside an isolated child binary with an empty table.
     #[test]
     fn wait4_targets_one_pid() {
         let _guard = crate::ldso::testlock::lock();

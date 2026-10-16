@@ -12,6 +12,8 @@ pub mod ctype;
 #[cfg(target_arch = "x86_64")]
 pub mod dirent;
 #[cfg(target_arch = "x86_64")]
+pub mod env;
+#[cfg(target_arch = "x86_64")]
 pub mod epoll;
 pub mod errno;
 #[cfg(target_arch = "x86_64")]
@@ -35,7 +37,11 @@ pub mod panic;
 #[cfg(target_arch = "x86_64")]
 pub mod poll;
 #[cfg(target_arch = "x86_64")]
+pub mod prng;
+#[cfg(target_arch = "x86_64")]
 pub mod process;
+#[cfg(target_arch = "x86_64")]
+pub mod pty;
 #[cfg(target_arch = "x86_64")]
 pub mod setjmp;
 #[cfg(target_arch = "x86_64")]
@@ -47,10 +53,14 @@ pub mod start;
 pub mod stat;
 pub mod stdio;
 #[cfg(target_arch = "x86_64")]
+pub mod stdlib;
+#[cfg(target_arch = "x86_64")]
 pub mod string;
 pub mod symbols;
 pub mod sync;
 pub mod syscall;
+#[cfg(target_arch = "x86_64")]
+pub mod temp;
 #[cfg(target_arch = "x86_64")]
 pub mod termios;
 #[cfg(target_arch = "x86_64")]
