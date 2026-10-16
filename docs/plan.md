@@ -752,6 +752,25 @@ en el mismo edit o el rojo es tuyo, no del agente; (3) todo literal
 numérico en tests/vector es presa de clippy (`PI`, precisión
 excesiva, `div_ceil`, `%2`) — vectores via `from_bits`/consts.
 
+## Ola 7C (3 subagentes en paralelo, `ws/6e-1`): `getopt` + syscalls
+
+Entregado y verde (10 gates + 162/160 tests + CI): `src/getopt.rs`
+(+ `optreset`/`__posix_getopt` débiles, ambos baseline), `src/unistd.rs`
+(22 wrappers incl. `pwrite` vía `pwritev2` + `dup3`/`dup2` con bucles
+`EBUSY` como musl), `src/fcntl.rs` + `src/stat.rs` (`struct Stat`
+144 B verificado) + `src/mman.rs` (`MAP_FAILED`, no null). Contador:
+**171/1650 (10,4 %)**, delta +43 exacto y paridad `.so` 171/171.
+`gate-syscall` en CI (open/pipe/dup2/pread/stat/errno/getopt).
+
+Reglas endurecidas: (1) `/tmp/*.txt` se evapora entre sesiones —
+regenerar, jamás asumir (casi certifico un baseline roto); (2) todo
+assert de errno-valor comparte `testlock` + viaja al step serial de CI
+(convención extendida a `fcntl`/`mman`/`pause`); (3) ficheros tmp de
+tests con tag por test, no solo por pid (hilos paralelos comparten
+pid); (4) en revisión, verificar cada `#[allow]` no-estándar, cada
+`O_*` raro (`O_ACCMODE=(03|O_SEARCH)` es real) y cada desvío musl
+contra el fuente, no contra el reporte.
+
 ## "100% done" criteria
 
 - All public musl x86_64 symbols present with correct signature/ABI.
