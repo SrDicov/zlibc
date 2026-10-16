@@ -154,8 +154,10 @@ jobs:
           mkdir -p /tmp/zlibc-smoke
           echo "== archive members =="
           ar t "$a" | head -8
-          echo "== raw nm head =="
-          nm --defined-only "$a" 2>&1 | head -30
+          echo "== no_mangle probes in archive =="
+          nm --defined-only "$a" 2>/dev/null | grep -E ' (malloc|_dlstart|printf|memcpy|_start|__errno_location|__libc_start_main|_Exit)$' | head -20
+          echo "== global T count =="
+          nm --defined-only "$a" 2>/dev/null | grep -c ' T ' 
           # --whole-archive: an archive only donates members that resolve
           # an undefined symbol, and a freestanding libc has almost no
           # undefined references to trigger on (musl links loose objects
