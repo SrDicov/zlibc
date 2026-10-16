@@ -243,10 +243,10 @@ jobs:
           objdump -d --disassemble=_dlstart_c "$so" | head -100
           echo "== pre-reloc indirect/GOT uses (want: none) =="
           for f in _dlstart _dlstart_boot _dlstart_c find_auxv relocate_self zero_words decode_dyn decode_vec app_dso_from_aux envp_from_sp diag_boot diag_hex diag_raw; do
-            hits=$(objdump -d --disassemble="$f" "$so" | grep -E '@plt|@GOTPCREL|call \*|jmp \*')
+            hits=$(objdump -d --disassemble="$f" "$so" | grep -E '@plt|@GOTPCREL|call \*|jmp \*' || true)
             if [ -n "$hits" ]; then echo "== $f =="; echo "$hits" | head -8; fi
           done
-          pre=$(for f in _dlstart _dlstart_boot _dlstart_c find_auxv relocate_self zero_words decode_dyn decode_vec app_dso_from_aux envp_from_sp diag_boot diag_hex diag_raw; do objdump -d --disassemble="$f" "$so"; done | grep -E '@plt|@GOTPCREL|call \*|jmp \*')
+          pre=$(for f in _dlstart _dlstart_boot _dlstart_c find_auxv relocate_self zero_words decode_dyn decode_vec app_dso_from_aux envp_from_sp diag_boot diag_hex diag_raw; do objdump -d --disassemble="$f" "$so"; done | grep -E '@plt|@GOTPCREL|call \*|jmp \*' || true)
           echo "$pre"
           test -z "$pre"
           echo "== GOT-filling relocs (want: only RELATIVE, no GLOB_DAT pre-reloc hazard) =="
