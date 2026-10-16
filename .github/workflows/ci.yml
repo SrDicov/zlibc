@@ -358,6 +358,17 @@ jobs:
           test "$?" = "134"
           echo "gate-exit ran: 42/43/134"
 
+      - name: Build and run gate-float (dtoa %f/%e/%g/%a/%Lf)
+        run: |
+          set -e
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc smoke/gate-float.c -o /tmp/zlibc-smoke/gate-float -Wl,--dynamic-linker,$so
+          out=$(timeout 10 /tmp/zlibc-smoke/gate-float)
+          printf '%s' "$out" | head -1 | grep -q '^\[3\.500000\]\[3\.14\]\[1\.234568e+05\]\[100000\]\[0x1\.8p+0\]\[1\.500000\]$'
+          printf '%s' "$out" | sed -n '2p' | grep -q '^\[0003\.142\]\[2\.5     !\]\[+0\]\[ 0\]\[100\.000\]$'
+          printf '%s' "$out" | sed -n '3p' | grep -q '^\[inf\]\[-inf\]\[-nan\]$'
+          echo "gate-float ran byte-exact"
+
       - name: Diagnose cold boot on failure
         if: failure()
         run: |

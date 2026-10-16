@@ -18,8 +18,12 @@
 //! Lock order is always stdio → heap, never the reverse (the allocator
 //! never takes the stdio lock), so no deadlock cycle exists.
 
-use core::ffi::{c_char, c_int, c_void};
+pub mod dtoa;
+pub mod lockfile;
+
+use core::ffi::{c_char, c_int, c_long, c_void};
 use core::ptr::{addr_of_mut, null_mut};
+use core::sync::atomic::AtomicI32;
 
 use crate::errno::__errno_location;
 use crate::malloc::{free, malloc};
@@ -70,6 +74,11 @@ pub struct File {
     rpos: usize,
     rlen: usize,
     next: *mut File,
+    /// musl `f.lock` (stdio_impl.h:38): owner tid + MAYBE_WAITERS bit.
+    /// Zero-init: unlocked. Owned by `lockfile.rs`; `slock` stays global.
+    lock: AtomicI32,
+    /// musl `f.lockcount` (stdio_impl.h:36): recursive-hold depth.
+    lockcount: c_long,
 }
 
 static mut STDIO_LOCK: MutexT = [0; 5];
@@ -83,6 +92,8 @@ static mut STDIN_FILE: File = File {
     rpos: 0,
     rlen: 0,
     next: null_mut(),
+    lock: AtomicI32::new(0),
+    lockcount: 0,
 };
 static mut STDIN_BUF: [u8; STDIO_BUF] = [0; STDIO_BUF];
 static mut STDOUT_FILE: File = File {
@@ -95,6 +106,8 @@ static mut STDOUT_FILE: File = File {
     rpos: 0,
     rlen: 0,
     next: null_mut(),
+    lock: AtomicI32::new(0),
+    lockcount: 0,
 };
 static mut STDOUT_BUF: [u8; STDIO_BUF] = [0; STDIO_BUF];
 static mut STDERR_FILE: File = File {
@@ -107,6 +120,8 @@ static mut STDERR_FILE: File = File {
     rpos: 0,
     rlen: 0,
     next: null_mut(),
+    lock: AtomicI32::new(0),
+    lockcount: 0,
 };
 /// musl `src/stdio/stdin.c:16`, `stdout.c:17`, `stderr.c:17` (`FILE *const`).
 #[no_mangle]
@@ -281,6 +296,8 @@ unsafe fn make_file(fd: c_int, read: bool, write: bool) -> *mut File {
         (*f).rpos = 0;
         (*f).rlen = 0;
         (*f).next = addr_of_mut!(OPEN_LIST).read();
+        (*f).lock = AtomicI32::new(0);
+        (*f).lockcount = 0;
         addr_of_mut!(OPEN_LIST).write(f);
         f
     }
@@ -739,25 +756,32 @@ impl Ap {
         }
     }
 
-    /// Skip one floating-point slot (floats ignored packet-wide): the
-    /// trampoline spills exactly 8 XMM regs (offsets 48..176), so the
-    /// 9th double lives on the overflow stack like any stack arg.
-    unsafe fn fp_skip(&mut self) {
+    /// Read one `double` as bits, advancing over one 16-byte XMM slot (low 8 hold the `double`, LE)
+    /// (XMM slots are 16 bytes; the value sits in the low 8, LE).
+    unsafe fn fp_bits(&mut self) -> u64 {
         unsafe {
             let t = &mut *self.t;
             if t.fp < 176 {
+                let v = (t.regsave.add(t.fp as usize) as *const u64).read_unaligned();
                 t.fp += 16;
+                v
             } else {
+                let v = (t.overflow as *const u64).read_unaligned();
                 t.overflow = t.overflow.add(8);
+                v
             }
         }
     }
 
-    /// Skip one 16-byte stack slot (`%Lf`: SysV MEMORY class, 16-aligned).
-    unsafe fn stk16(&mut self) {
+    /// Read one 16-byte stack slot as bytes, advancing over one 16-byte stack slot (aligned up first) (`%Lf`: 10 LE bytes used, f80 extended).
+    unsafe fn stk16_bytes(&mut self) -> [u8; 16] {
         unsafe {
             let t = &mut *self.t;
-            t.overflow = (((t.overflow as usize + 15) & !15) + 16) as *mut u8;
+            t.overflow = ((t.overflow as usize + 15) & !15) as *mut u8;
+            let mut b = [0u8; 16];
+            core::ptr::copy_nonoverlapping(t.overflow, b.as_mut_ptr(), 16);
+            t.overflow = t.overflow.add(16);
+            b
         }
     }
 }
@@ -1083,17 +1107,31 @@ unsafe fn convert(out: &mut Out, sp: &Spec, ap: &mut Ap) {
                 }
             }
             _ => {
-                // Floats (`f e g a`, upper too): consume, emit nothing.
-                // `L` is the 16-byte SysV MEMORY class, the rest XMM slots.
+                // Floats (`f e g a`, upper too): format through dtoa
+                // (Work Order 7B). `L` is the 16-byte SysV MEMORY class,
+                // the rest XMM slots. Outputs past the 2K scratch
+                // truncate (documented ceiling: stream the digits when a
+                // real workload needs more).
                 if matches!(
                     sp.spec,
                     b'f' | b'F' | b'e' | b'E' | b'g' | b'G' | b'a' | b'A'
                 ) {
-                    if sp.wide == 2 {
-                        ap.stk16();
+                    let fm = dtoa::FmtSpec {
+                        spec: sp.spec,
+                        w: sp.width,
+                        prec: sp.prec,
+                        flags: sp.flags as u32,
+                    };
+                    let mut scratch = [0u8; 2048];
+                    let n = if sp.wide == 2 {
+                        let b16 = ap.stk16_bytes();
+                        let mut ext10 = [0u8; 10];
+                        ext10.copy_from_slice(&b16[..10]);
+                        dtoa::fmt_f80_bits(&mut scratch, &ext10, &fm)
                     } else {
-                        ap.fp_skip();
-                    }
+                        dtoa::fmt_f64_bits(&mut scratch, ap.fp_bits(), &fm)
+                    };
+                    out.emit(&scratch[..n]);
                 } else {
                     // Unknown spec: echo deterministically, never crash.
                     out.emit(&[sp.spec]);
@@ -1565,7 +1603,7 @@ mod tests {
                 3.5f64,
                 2 as c_int,
             );
-            let want: &[u8] = b"1||2";
+            let want: &[u8] = b"1|3.500000|2";
             assert_eq!(rc as usize, want.len());
             assert_eq!(&fbuf[..want.len()], want);
         }
@@ -1596,13 +1634,27 @@ mod tests {
             (*ap.t).gp = 48;
             assert_eq!(ap.gp(), 0xdead);
             assert_eq!(ap.gp(), 0xbeef);
-            // Skips only move cursors (checked exactly, never dereferenced).
-            let fp0 = (*ap.t).fp;
-            ap.fp_skip();
-            assert_eq!((*ap.t).fp, fp0 + 16);
-            let ob = (*ap.t).overflow as usize;
-            ap.stk16();
-            assert_eq!((*ap.t).overflow as usize, ((ob + 15) & !15) + 16);
+            // Readers return slot bits and move cursors exactly.
+            // regs[1] sits at byte offset 8, inside the array.
+            (*ap.t).fp = 8;
+            assert_eq!(ap.fp_bits(), 0x1122_3344_5566_7788);
+            assert_eq!((*ap.t).fp, 24);
+            // 16 aligned bytes planted in a 48-byte scratch (offset and
+            // span both in bounds by construction).
+            let mut raw = [0u8; 48];
+            let base = raw.as_mut_ptr() as usize;
+            let start = (base + 15) & !15;
+            for (i, v) in 0x1122_3344_5566_7788u64.to_le_bytes().iter().enumerate() {
+                *((start + i) as *mut u8) = *v;
+            }
+            for (i, v) in 0xdead_beef_cafe_1234u64.to_le_bytes().iter().enumerate() {
+                *((start + 8 + i) as *mut u8) = *v;
+            }
+            (*ap.t).overflow = base as *mut u8;
+            let b16 = ap.stk16_bytes();
+            assert_eq!(&b16[..8], &0x1122_3344_5566_7788u64.to_le_bytes());
+            assert_eq!(&b16[8..], &0xdead_beef_cafe_1234u64.to_le_bytes());
+            assert_eq!((*ap.t).overflow as usize, start + 16);
         }
     }
 
@@ -1672,7 +1724,7 @@ mod tests {
                 9.5f64,
                 99 as c_int,
             );
-            let want: &[u8] = b"11|22|33|44||||||||||99";
+            let want: &[u8] = b"11|22|33|44|1.500000|2.500000|3.500000|4.500000|5.500000|6.500000|7.500000|8.500000|9.500000|99";
             assert_eq!(rc as usize, want.len());
             assert_eq!(&buf[..want.len()], want);
         }

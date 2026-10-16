@@ -17,7 +17,7 @@ set -eu
 export LC_ALL=C
 
 # Lowest source-level count known green. Fase 0: 117.
-FLOOR=125
+FLOOR=128
 
 root=$(dirname "$0")/..
 baseline=$root/tools/musl-exports.txt
