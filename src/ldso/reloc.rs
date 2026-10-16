@@ -633,6 +633,22 @@ pub unsafe fn do_relocs(
                     if def_sym.is_null()
                         && ((*s).st_shndx != SHN_UNDEF || (*s).st_info >> 4 != STB_WEAK)
                     {
+                        // The executable supplies `main`; the loader cannot
+                        // resolve it at pass 1 (the app is not mapped yet).
+                        // Skip the generated slot; musl leaves it for the
+                        // application pass. Fatal for anything else undefined.
+                        let is_main = unsafe {
+                            *name == b'm' as i8
+                                && *name.add(1) == b'a' as i8
+                                && *name.add(2) == b'i' as i8
+                                && *name.add(3) == b'n' as i8
+                                && *name.add(4) == 0
+                        };
+                        if is_main {
+                            p = p.add(stride);
+                            left -= step;
+                            continue;
+                        }
                         if !(*dso).lazy.is_null() && (ty == REL_PLT || ty == REL_GOT) {
                             let slot = (*dso).lazy.add((*dso).lazy_cnt * 3);
                             *slot.add(0) = r_off;
