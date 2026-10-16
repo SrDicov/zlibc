@@ -10,5 +10,13 @@
 # satisfy rustc's `eh_personality` lang-item requirement — that needs
 # nightly `#[lang]` — so unwind builds hard-error here. When unwinding
 # support genuinely lands, this flag goes away with it.)
+#
+# `--crate-type staticlib` rides along here (manifest stays rlib-only):
+# the 6E smoke links `libzlibc.a` by hand (musl two-stage shape), but a
+# `staticlib` in the manifest would also apply to HOST builds, where
+# `staticlib` + default unwind + `no_std` is a rustc hard error
+# ("unwinding panics are not supported without std"; rlib is exempt).
+# Scoped flags give each target exactly what it tolerates: host gets
+# rlib+unwind, musl gets rlib+staticlib+abort.
 [target.x86_64-unknown-linux-musl]
-rustflags = ["-C", "panic=abort"]
+rustflags = ["-C", "panic=abort", "--crate-type", "staticlib"]

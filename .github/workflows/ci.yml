@@ -61,14 +61,16 @@ jobs:
         if: failure()
         run: |
           sudo apt-get install -y gdb binutils
-          bin=$(ls -t target/release/deps/zlibc-* | grep -v '\.' | head -1)
-          echo "=== test binary: $bin ==="
+          bin=$(ls -t target/release/deps/zlibc-* 2>/dev/null | grep -v '\.' | head -1 || true)
+          echo "=== test binary: ${bin:-<none built>} ==="
+          if [ -n "$bin" ]; then
           echo "=== can it even list tests? (crash here = init-time) ==="
           "$bin" --list 2>&1 | tail -3 || true
           echo "=== serial tail (crasher is the test after the last ok) ==="
           "$bin" --test-threads=1 2>&1 | tail -5 || true
           echo "=== backtrace ==="
           gdb --batch --ex run --ex bt --args "$bin" --test-threads=1 2>&1 | tail -30 || true
+          fi
 
       - name: Build (x86_64-unknown-linux-musl, release)
         run: cargo build --release --target x86_64-unknown-linux-musl
