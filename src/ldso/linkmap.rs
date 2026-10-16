@@ -587,20 +587,16 @@ pub unsafe fn do_fini_all() {
     }
 }
 
-/// Linker-provided fini-array bounds (musl reads `__fini_array_start/end`
-/// from crt; our `-nostdlib` link has no crt, so we anchor them here as
-/// empty. The version script keeps them out of `.dynsym` (non-baseline).
-/// If the link ever gains crt objects that define these, delete these.
-#[cfg(target_arch = "x86_64")]
-#[no_mangle]
-pub static __fini_array_start: [usize; 0] = [];
-#[cfg(target_arch = "x86_64")]
-#[no_mangle]
-pub static __fini_array_end: [usize; 0] = [];
-
-/// Real exit-time finalizer (musl `exit.c:20-26` shape: own
-/// `__fini_array` back-to-front, then `_fini`; DSO destructors via
-/// [`do_fini_all`]). Overrides the weak dummy in `crate::start`.
+/// Real exit-time finalizer (musl `exit.c:20-26` shape, adapted: musl
+/// reads the main program's `__fini_array` through linker-provided
+/// symbols, but our `-nostdlib` link has no crt to anchor them — two
+/// empty same-crate statics sit at whatever addresses the linker picks,
+/// so iterating between them would call unrelated rodata (seen:
+/// `SIGILL` on a toolchain whose layout separates them). Instead every
+/// loaded object, app included, runs its `DT_FINI_ARRAY`/`DT_FINI` via
+/// [`do_fini_all`], which reads the tags out of each object's own
+/// dynamic section. Then `_fini` (weak dummy, as before).
+/// Overrides the weak dummy in `crate::start`.
 ///
 /// # Safety
 ///
@@ -610,18 +606,7 @@ pub static __fini_array_end: [usize; 0] = [];
 pub unsafe extern "C" fn __libc_exit_fini() {
     unsafe {
         extern "C" {
-            static __fini_array_start: *const usize;
-            static __fini_array_end: *const usize;
             fn _fini();
-        }
-        let mut a = __fini_array_end as usize;
-        let lo = __fini_array_start as usize;
-        while a > lo {
-            a -= size_of::<usize>();
-            let f: unsafe extern "C" fn() = core::mem::transmute(*(a as *const usize));
-            if !(f as usize == 0) {
-                f();
-            }
         }
         _fini();
         do_fini_all();
