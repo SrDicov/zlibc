@@ -365,6 +365,10 @@ pub struct Elf64Sym {
 /// whole `ldso` tree, because the state is shared across modules and CI
 /// splits the suite into parallel and serial steps.
 ///
+/// errno-value asserts anywhere in the crate share it too: under libtest
+/// threads every errno-setting test writes the same global fallback
+/// cell, so an exact-value assert is only meaningful holding this.
+///
 /// Release-on-drop, so a failing assertion reports instead of deadlocking
 /// every later test in the binary.
 #[cfg(test)]

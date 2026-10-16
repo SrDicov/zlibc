@@ -35,7 +35,7 @@ jobs:
         run: cargo build --verbose --target x86_64-unknown-linux-musl
 
       - name: Test (non-thread, parallel)
-        run: 'timeout 120 cargo test --verbose -- --skip thread:: --skip errno::tests::errno_is_per_thread --skip validation:: --skip ldso::linkmap::'
+        run: 'timeout 120 cargo test --verbose -- --skip thread:: --skip errno::tests::errno_is_per_thread --skip validation:: --skip ldso::linkmap:: --skip fcntl::tests::fcntl_dup_and_flags_roundtrip --skip mman::tests::mmap_bad_offset_is_einval --skip unistd::tests::pause_returns_eintr_after_signal'
       # Thread tests touch per-thread CPU state (FS) and process-global
       # signal dispositions/registry: serial by design, like musl's own
       # tests. Parallel cargo threads would interleave that global state.
@@ -48,8 +48,11 @@ jobs:
       # So does the D5 validation test (threads + malloc + stdio), and
       # the link-map tests, which own the loader's namespace globals
       # (head/tail/syms_tail) exactly like the thread registry owns its.
+      # Tests asserting exact errno VALUES ride here too: under libtest
+      # threads every errno-setting test shares the global fallback cell,
+      # so a value assert is only meaningful serially.
       - name: Test thread (serial)
-        run: 'timeout 120 cargo test --verbose -- thread:: errno::tests::errno_is_per_thread validation:: ldso::linkmap:: --test-threads=1'
+        run: 'timeout 120 cargo test --verbose -- thread:: errno::tests::errno_is_per_thread validation:: ldso::linkmap:: fcntl::tests::fcntl_dup_and_flags_roundtrip mman::tests::mmap_bad_offset_is_einval unistd::tests::pause_returns_eintr_after_signal --test-threads=1'
       # Everything above is -O0 codegen. Release is where LLVM first sees
       # the byte-loops and the inline asm: run the whole suite optimized,
       # serially, so optimization regressions surface here and not at the
@@ -368,6 +371,15 @@ jobs:
           printf '%s' "$out" | sed -n '2p' | grep -q '^\[0003\.142\]\[2\.5     !\]\[+0\]\[ 0\]\[100\.000\]$'
           printf '%s' "$out" | sed -n '3p' | grep -q '^\[inf\]\[-inf\]\[-nan\]$'
           echo "gate-float ran byte-exact"
+
+      - name: Build and run gate-syscall (POSIX wrappers on boot)
+        run: |
+          set -e
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc smoke/gate-syscall.c -o /tmp/zlibc-smoke/gate-syscall -Wl,--dynamic-linker,$so
+          out=$(timeout 10 /tmp/zlibc-smoke/gate-syscall)
+          test "$out" = "syscall ok"
+          echo "gate-syscall ran: $out"
 
       - name: Diagnose cold boot on failure
         if: failure()
