@@ -45,27 +45,6 @@ pub struct BootInfo {
 ///
 /// `sp` must be the kernel stack (`argc`, `argc` pointers, NULL, env
 /// strings, NULL, auxv pairs).
-/// Zero `n` words at `p` with volatile stores (musl writes its
-/// tables the same way conceptually: no library call may appear here).
-/// A plain zeroing loop over 256+ bytes is folded by LLVM into a
-/// `memset` libcall (`_dlstart_c`'s `dynt` died exactly this way: the
-/// call went through an unrelocated GOT slot), and neither `volatile`
-/// stores nor this size can be idiom-recognized. Pre-reloc-only by
-/// design; anywhere else a plain loop is clearer.
-///
-/// # Safety
-///
-/// `p` must be writable for `n` words.
-unsafe fn zero_words(p: *mut usize, n: usize) {
-    unsafe {
-        let mut i = 0usize;
-        while i < n {
-            core::ptr::write_volatile(p.add(i), 0);
-            i += 1;
-        }
-    }
-}
-
 /// `envp` from the kernel stack: `argv` is `sp+1`, `envp` follows the
 /// `argc` pointers plus their terminator (mirrors [`find_auxv`], which
 /// walks one step further to the auxv).
@@ -73,6 +52,13 @@ unsafe fn zero_words(p: *mut usize, n: usize) {
 /// # Safety
 ///
 /// `sp` must be the kernel stack.
+/// Pre-reloc scratch for `_dlstart_c`. A stack `[usize; N]` initialized
+/// at function entry makes rustc emit a `memset` indirect call, which is
+/// poison before self-relocation (the GOT slot is still zero); static
+/// zero storage cannot be rewritten that way. Set once during boot.
+static mut AUX_BUF: [usize; AUX_CNT] = [0; AUX_CNT];
+static mut DYNT_BUF: [usize; DYN_CNT] = [0; DYN_CNT];
+
 pub(crate) unsafe fn envp_from_sp(sp: *const usize) -> *mut *mut core::ffi::c_char {
     unsafe {
         let argc = sp.read();
@@ -82,9 +68,7 @@ pub(crate) unsafe fn envp_from_sp(sp: *const usize) -> *mut *mut core::ffi::c_ch
 
 pub(crate) unsafe fn find_auxv(sp: *const usize) -> *const usize {
     unsafe {
-        super::boot::diag_hex(b"sp=", sp as usize);
         let argc = sp.read();
-        super::boot::diag_hex(b"argc=", argc);
         let argv = sp.add(1) as *const *const u8;
         let mut i = argc + 1;
         while !(*argv.add(i)).is_null() {
@@ -223,28 +207,19 @@ pub unsafe extern "C" fn _dlstart() {
 unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usize {
     unsafe {
         let auxv = find_auxv(sp);
-        super::boot::diag_boot(b"c: auxv found\n");
-        let mut aux_u: core::mem::MaybeUninit<[usize; AUX_CNT]> = core::mem::MaybeUninit::uninit();
-        zero_words(aux_u.as_mut_ptr() as *mut usize, AUX_CNT);
-        // Sound: every word was just volatile-written above; split from
-        // `uninit()` so the `uninit_assumed_init` lint (which cannot see
-        // through volatile stores) stays quiet honestly.
-        let mut aux: [usize; AUX_CNT] = aux_u.assume_init();
+        let aux = core::ptr::addr_of_mut!(AUX_BUF) as *mut usize;
         let mut i = 0usize;
         while *auxv.add(i) != AT_NULL {
             if *auxv.add(i) < AUX_CNT {
-                aux[*auxv.add(i)] = *auxv.add(i + 1);
+                *aux.add(*auxv.add(i)) = *auxv.add(i + 1);
             }
             i += 2;
         }
-        super::boot::diag_boot(b"c: aux filled\n");
-        let mut dynt_u: core::mem::MaybeUninit<[usize; DYN_CNT]> = core::mem::MaybeUninit::uninit();
-        zero_words(dynt_u.as_mut_ptr() as *mut usize, DYN_CNT);
-        let mut dynt: [usize; DYN_CNT] = dynt_u.assume_init();
+        let dynt = core::ptr::addr_of_mut!(DYNT_BUF) as *mut usize;
         let mut j = 0usize;
         while *dynv.add(j) != DT_NULL {
             if *dynv.add(j) < DYN_CNT {
-                dynt[*dynv.add(j)] = *dynv.add(j + 1);
+                *dynt.add(*dynv.add(j)) = *dynv.add(j + 1);
             }
             j += 2;
         }
@@ -252,23 +227,23 @@ unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usize {
         // Bias (dlstart.c:104-115): `AT_BASE`, else `_DYNAMIC` minus the
         // `PT_DYNAMIC` virtual address, scanning backward like musl
         // (dlstart.c:109) so the LAST `PT_DYNAMIC` wins.
-        let mut base = aux[AT_BASE];
+        let mut base = *aux.add(AT_BASE);
         if base == 0 {
-            let mut k = aux[AT_PHNUM];
-            let phent = aux[AT_PHENT];
+            let mut k = *aux.add(AT_PHNUM);
+            let phent = *aux.add(AT_PHENT);
             while k > 0 {
                 k -= 1;
-                let ph = (aux[AT_PHDR] as *const u8).add(k * phent) as *const Elf64Phdr;
+                let ph = (*aux.add(AT_PHDR) as *const u8).add(k * phent) as *const Elf64Phdr;
                 if (*ph).p_type == PT_DYNAMIC {
                     base = (dynv as usize).wrapping_sub((*ph).p_vaddr as usize);
                     break;
                 }
             }
         }
-        super::boot::diag_hex(b"aux_base=", aux[AT_BASE]);
+        super::boot::diag_hex(b"aux_base=", *aux.add(AT_BASE));
         super::boot::diag_hex(b"dynv=", dynv as usize);
         super::boot::diag_hex(b"base=", base);
-        relocate_self(base, &dynt);
+        relocate_self(base, &*core::ptr::addr_of!(DYNT_BUF));
         super::boot::diag_hex(b"relocated=", base);
         base
     }
