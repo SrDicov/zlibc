@@ -332,6 +332,16 @@ jobs:
           test "$out" = "gate-deps 42"
           echo "gate-deps ran: $out"
 
+      - name: Build and run gate-dlopen (dlopen, ctors, dlsym)
+        run: |
+          set -e
+          musl-gcc -shared -fPIC -o /tmp/zlibc-gate-deps/libdmod.so smoke/dmod.c
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc smoke/gate-dlopen.c -o /tmp/zlibc-smoke/gate-dlopen -Wl,--dynamic-linker,$so
+          out=$(timeout 10 /tmp/zlibc-smoke/gate-dlopen)
+          test "$out" = "dlopen ok"
+          echo "gate-dlopen ran: $out"
+
       - name: Diagnose cold boot on failure
         if: failure()
         run: |

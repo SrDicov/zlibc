@@ -35,10 +35,15 @@ use super::{
 /// musl `reloc_all` (`dynlink.c:1412-1440`) for one object: PLT, then
 /// REL, RELA, RELR, then mark it done.
 ///
-/// The main program is relocated with `skip_relative` set, because
-/// `_dlstart` already applied its `R_X86_64_RELATIVE` entries before any
-/// of this code existed (musl does the same for `&ldso` with
-/// `IS_RELATIVE`, `dynlink.c:400-408`).
+/// The main program is relocated with `skip_relative` clear: unlike
+/// `LDSO` (whose `RELATIVE` entries `_dlstart`/`relocate_self` already
+/// applied before any of this code existed), nothing has touched the
+/// program's `RELATIVE` slots yet — the kernel maps but never
+/// relocates. Skipping them here used to go unnoticed (calls run
+/// through the eagerly-resolved PLT), until constructor dispatch read
+/// an unrelocated `.init_array` entry and jumped to a bare file
+/// offset. musl applies them in `__dls3` the same way
+/// (`dynlink.c:1995-2000`).
 ///
 /// # Safety
 ///
@@ -250,9 +255,7 @@ pub unsafe fn dynlink_boot(
         }
         diag_boot(b"boot: deps loaded, scope linked\n");
         // Stage 5: everything but the main program, then the main
-        // program separately. Its `RELATIVE` entries are already applied
-        // by `_dlstart`, so it is the one object relocated with
-        // `skip_relative`.
+        // program with RELATIVE included (nothing applied them yet).
         let mut q = (*app).next;
         while !q.is_null() {
             diag_boot(b"boot: reloc dep ");
@@ -261,9 +264,17 @@ pub unsafe fn dynlink_boot(
             q = (*q).next;
         }
         diag_boot(b"boot: reloc app\n");
-        reloc_all(linkmap::head(), app, true);
+        reloc_all(linkmap::head(), app, false);
         diag_boot(b"boot: relocated, jumping\n");
-        // Stage 6: entry point.
+        // Stage 6: constructors, dependency-first (musl `main_ctor_queue`
+        // + `do_init_fini`, `dynlink.c:1624/2014`). A null queue (calloc
+        // failure) runs nothing — musl's pre-runtime outcome as well.
+        let queue = linkmap::queue_ctors(app);
+        if !queue.is_null() {
+            linkmap::do_init_fini(queue);
+            crate::malloc::free(queue as *mut core::ffi::c_void);
+        }
+        // Stage 7: entry point.
         aux[AT_ENTRY]
     }
 }
@@ -577,19 +588,14 @@ unsafe fn fixup_rpath(p: *mut Dso, buf: *mut u8, buf_size: usize) -> c_int {
     }
 }
 
-/// Bare-soname search (musl `dynlink.c:1120-1165` minus the
-/// `/etc/ld-musl-*.path` config file): `LD_LIBRARY_PATH` unless secure,
-/// then each `needed_by` ancestor's `RPATH`/`RUNPATH` with `$ORIGIN`
-/// expansion, then the system defaults.
+/// Bare-soname search (musl `dynlink.c:1120-1165`): `LD_LIBRARY_PATH`
+/// unless secure, then each `needed_by` ancestor's `RPATH`/`RUNPATH`
+/// with `$ORIGIN` expansion, then the `/etc/ld-musl-<arch>.path`
+/// admin config, then the system defaults.
 ///
 /// `env_path` arrives resolved by the caller so tests can drive every
 /// branch without process state. Returns the fd, -1 when nothing
 /// matched, -2 when a failure inhibited the whole search.
-///
-/// shortcut(/etc/ld-musl-arch.path): musl reads an admin opt-in config
-/// file before falling back to the defaults (`dynlink.c:1129-1163`).
-/// No container ships it, and when absent musl behaves exactly like
-/// this function. Adopt it when a real image needs it.
 ///
 /// # Safety
 ///
@@ -617,10 +623,109 @@ unsafe fn search_bare(
             }
             p = (*p).needed_by;
         }
+        // Tests stay hermetic: no filesystem config there (a stray
+        // /etc file on the dev host must not change unit results).
+        #[cfg(not(test))]
+        if fd == -1 {
+            let sys = etc_sys_path();
+            if !sys.is_null() {
+                fd = path_open(name, sys, buf, buf_size);
+            }
+        }
         if fd == -1 {
             fd = path_open(name, DEFAULT_PATHS.as_ptr() as *const c_char, buf, buf_size);
         }
         fd
+    }
+}
+
+/// musl `/etc/ld-musl-$ARCH.path` (`dynlink.c:1129-1163`): admin opt-in
+/// system path, read once and cached. Directory prefix comes from our
+/// own path (`ldso.name` up to the last `/`); with no usable prefix the
+/// bare `/etc/...` is tried, exactly like musl's empty-prefix arm.
+/// Returns null when the file is absent or unreadable (musl falls back
+/// to the defaults then too), else the NUL-terminated path list.
+/// Content is capped at the static buffer; a longer file is truncated
+/// (musl has no cap — ponytail: full-size read when a real config
+/// exceeds 4K).
+///
+/// # Safety
+///
+/// Single-threaded boot / `dlopen`-lock context only (plain statics).
+#[cfg(all(not(test), target_arch = "x86_64"))]
+unsafe fn etc_sys_path() -> *const c_char {
+    const CAP: usize = 4096;
+    static mut BUF: [u8; CAP] = [0; CAP];
+    static mut DONE: bool = false;
+    // Raw pointers throughout (`addr_of_mut!`): edition-2024 forbids
+    // shared/mut references to `static mut`, and `__syscall!` carries
+    // its own `unsafe`.
+    let b = core::ptr::addr_of_mut!(BUF).cast::<u8>();
+    let done = core::ptr::addr_of_mut!(DONE);
+    if unsafe { *done } {
+        return unsafe {
+            if *b == 0 {
+                core::ptr::null()
+            } else {
+                b as *const c_char
+            }
+        };
+    }
+    unsafe { *done = true };
+    // "<dir>/etc/ld-musl-x86_64.path".
+    let mut path = [0u8; 256];
+    let mut dir_len = 0usize;
+    let me = core::ptr::addr_of_mut!(LDSO);
+    if unsafe { !(*me).name.is_null() } {
+        let mut n = 0usize;
+        while unsafe { *(*me).name.add(n) } != 0 {
+            n += 1;
+        }
+        let mut last = 0usize;
+        let mut k = 0usize;
+        while k < n {
+            if unsafe { *(*me).name.add(k) } == b'/' as c_char {
+                last = k + 1;
+            }
+            k += 1;
+        }
+        dir_len = last;
+    }
+    let tail = b"/etc/ld-musl-";
+    let mut w = 0usize;
+    while w < dir_len && w + tail.len() + super::LDSO_ARCH.len() + 6 < path.len() {
+        path[w] = unsafe { *(*me).name.add(w) } as u8;
+        w += 1;
+    }
+    if w != dir_len {
+        return core::ptr::null();
+    }
+    for x in tail
+        .iter()
+        .chain(super::LDSO_ARCH.iter())
+        .chain(b".path\0".iter())
+    {
+        path[w] = *x;
+        w += 1;
+    }
+    let fd = crate::__syscall!(
+        super::SYS_OPENAT,
+        super::AT_FDCWD,
+        path.as_ptr(),
+        super::O_RDONLY | super::O_CLOEXEC,
+        0
+    ) as c_int;
+    if fd < 0 {
+        return core::ptr::null();
+    }
+    let n = crate::__syscall!(super::SYS_READ, fd, b, CAP - 1);
+    crate::__syscall!(super::SYS_CLOSE, fd);
+    if n <= 0 {
+        return core::ptr::null();
+    }
+    unsafe {
+        b.add(n as usize).write(0);
+        b as *const c_char
     }
 }
 
@@ -666,14 +771,12 @@ fn diag_raw(msg: &[u8]) {
 }
 
 /// musl `load_library` (`dynlink.c:1057-1260`): the self-name check,
-/// both dedup layers, search paths, open, `map_object`, link. The only
-/// deliberately missing search step is `/etc/ld-musl-*.path` (see
-/// [`search_bare`]).
+/// both dedup layers, search paths, open, `map_object`, link.
 ///
-/// The search paths are the remaining gap and are additive: a name with
-/// a `/` is opened directly, and a bare soname is only satisfied by an
-/// object already in the namespace, exactly like musl after its
-/// shortname layer.
+/// A name with a `/` is opened directly; a bare soname goes through
+/// `LD_LIBRARY_PATH`, ancestor `RPATH`/`RUNPATH`, the
+/// `/etc/ld-musl-<arch>.path` config, then the system defaults —
+/// the full musl order.
 ///
 /// # Safety
 ///

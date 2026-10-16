@@ -21,6 +21,82 @@ use super::{
     EINVAL, ENOTSUP, ESRCH, SYS_EXIT, SYS_MMAP, SYS_MPROTECT, SYS_MUNMAP, SYS_SET_TID_ADDRESS,
 };
 
+// Hide the `__pthread_*` impls (musl marks them hidden, e.g.
+// `clone.s:3`, `__set_thread_area.s:4`): in test builds this keeps our
+// symbols from interposing host glibc/std; in real links the weak
+// aliases below are the public face. Plain comment: rustdoc documents
+// no macro invocation.
+#[cfg(target_arch = "x86_64")]
+core::arch::global_asm!(
+    ".hidden __pthread_create\n.hidden __pthread_join\n.hidden __pthread_detach\n\
+    .hidden __pthread_self\n.hidden __pthread_equal\n.hidden __pthread_attr_init\n\
+    .hidden __pthread_attr_destroy\n.hidden __pthread_attr_setdetachstate\n\
+    .hidden __pthread_attr_getdetachstate\n.hidden __pthread_attr_setstacksize\n\
+    .hidden __pthread_attr_getstacksize\n.hidden __pthread_attr_setguardsize\n\
+    .hidden __pthread_attr_getguardsize\n.hidden __pthread_attr_setstack\n\
+    .hidden __pthread_attr_getstack\n.hidden __pthread_attr_setscope\n\
+    .hidden __pthread_attr_getscope\n.hidden __pthread_attr_setschedpolicy\n\
+    .hidden __pthread_attr_getschedpolicy\n.hidden __pthread_attr_setschedparam\n\
+    .hidden __pthread_attr_getschedparam\n.hidden __pthread_attr_setinheritsched\n\
+    .hidden __pthread_attr_getinheritsched"
+);
+
+// Public musl names for real links only (see module docs for why tests
+// must not export them).
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_create, __pthread_create);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_join, __pthread_join);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_detach, __pthread_detach);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_self, __pthread_self);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_equal, __pthread_equal);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_init, __pthread_attr_init);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_destroy, __pthread_attr_destroy);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_setdetachstate, __pthread_attr_setdetachstate);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_getdetachstate, __pthread_attr_getdetachstate);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_setstacksize, __pthread_attr_setstacksize);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_getstacksize, __pthread_attr_getstacksize);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_setguardsize, __pthread_attr_setguardsize);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_getguardsize, __pthread_attr_getguardsize);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_setstack, __pthread_attr_setstack);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_getstack, __pthread_attr_getstack);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_setscope, __pthread_attr_setscope);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_getscope, __pthread_attr_getscope);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_setschedpolicy, __pthread_attr_setschedpolicy);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_getschedpolicy, __pthread_attr_getschedpolicy);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_setschedparam, __pthread_attr_setschedparam);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_getschedparam, __pthread_attr_getschedparam);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_setinheritsched, __pthread_attr_setinheritsched);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_attr_getinheritsched, __pthread_attr_getinheritsched);
+
+// Loader-visible names live next to their targets (not in `mod.rs`):
+// module-level `global_asm!` rides with its module's codegen unit, and
+// `mod.rs` emits no surviving code of its own — after a whole-crate
+// repartition its aliases silently vanished from the archive (seen:
+// `W pthread_create` present with one file set, gone with another,
+// same toolchain). Beside the `__pthread_*` definitions they cannot
+// be orphaned.
 /// musl `include/limits.h:67` (`PTHREAD_STACK_MIN`), used for the exact
 /// `setstacksize`/`setstack` range check.
 const PTHREAD_STACK_MIN: usize = 2048;

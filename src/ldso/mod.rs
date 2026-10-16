@@ -21,6 +21,8 @@ use core::ffi::c_int;
 
 // ---- Syscalls (musl arch/x86_64/bits/syscall.h.in) ------------------------
 #[cfg(target_arch = "x86_64")]
+pub const SYS_READ: usize = 0; // TODO: generate from arch bits/syscall.h
+#[cfg(target_arch = "x86_64")]
 pub const SYS_CLOSE: usize = 3; // TODO: generate from arch bits/syscall.h
 #[cfg(target_arch = "x86_64")]
 pub const SYS_MMAP: usize = 9; // TODO: generate from arch bits/syscall.h
@@ -46,6 +48,11 @@ pub const SYS_READLINK: usize = 89;
 pub const AT_FDCWD: c_int = -100;
 /// musl `O_RDONLY` (musl `include/fcntl.h:44`): zero, no flags.
 pub const O_RDONLY: c_int = 0;
+/// musl `O_CLOEXEC` (musl `include/fcntl.h:58`): close-on-exec.
+pub const O_CLOEXEC: c_int = 0o2000000;
+/// musl `LDSO_ARCH` (`arch/x86_64/reloc.h` via Makefile): the arch tag in
+/// `/etc/ld-musl-<arch>.path`.
+pub const LDSO_ARCH: &[u8] = b"x86_64";
 /// Page size, assumed 4096: true on x86_64 (musl reads AT_PAGESZ).
 pub const PAGE_SIZE: usize = 4096;
 /// musl `PROT_*` (musl `include/sys/mman.h:57-60`).
@@ -194,6 +201,25 @@ pub const DT_STRTAB: usize = 5;
 /// musl `DT_SYMTAB` (musl `include/elf.h:746`).
 #[cfg(target_arch = "x86_64")]
 pub const DT_SYMTAB: usize = 6;
+/// musl `DT_INIT` (musl `include/elf.h:767`): legacy constructor address,
+/// run before `DT_INIT_ARRAY` (`do_init_fini`, no-legacy-initfini off).
+#[cfg(target_arch = "x86_64")]
+pub const DT_INIT: usize = 12;
+/// musl `DT_FINI` (musl `include/elf.h:767`): legacy destructor address.
+#[cfg(target_arch = "x86_64")]
+pub const DT_FINI: usize = 13;
+/// musl `DT_INIT_ARRAY` (musl `include/elf.h:789`): constructor array.
+#[cfg(target_arch = "x86_64")]
+pub const DT_INIT_ARRAY: usize = 25;
+/// musl `DT_FINI_ARRAY` (musl `include/elf.h:789`): destructor array.
+#[cfg(target_arch = "x86_64")]
+pub const DT_FINI_ARRAY: usize = 26;
+/// musl `DT_INIT_ARRAYSZ` (musl `include/elf.h:790`): its byte size.
+#[cfg(target_arch = "x86_64")]
+pub const DT_INIT_ARRAYSZ: usize = 27;
+/// musl `DT_FINI_ARRAYSZ` (musl `include/elf.h:790`): its byte size.
+#[cfg(target_arch = "x86_64")]
+pub const DT_FINI_ARRAYSZ: usize = 28;
 /// musl `DT_RPATH` (musl `include/elf.h:754`).
 #[cfg(target_arch = "x86_64")]
 pub const DT_RPATH: usize = 15;

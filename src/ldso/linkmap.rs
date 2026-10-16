@@ -22,7 +22,7 @@ use core::ptr::{addr_of_mut, null_mut};
 use core::sync::atomic::{AtomicPtr, Ordering};
 
 use super::dso::Dso;
-use super::DT_NEEDED;
+use super::{DT_INIT, DT_INIT_ARRAY, DT_INIT_ARRAYSZ, DT_NEEDED, DYN_CNT};
 
 // Namespace (musl `head`/`tail`, `dynlink.c:141`) and the scope tail
 // (`syms_tail`). `#[no_mangle]`-adjacent loader state has no thread
@@ -289,6 +289,246 @@ pub unsafe fn revert_syms(old_tail: *mut Dso) {
             p = next;
         }
         SYMS_TAIL.store(old_tail, Ordering::Release);
+    }
+}
+
+/// Grow `p->deps` from the direct list into the transitive closure,
+/// breadth-first, without duplicates (musl `extend_bfs_deps`,
+/// `dynlink.c:1307-1359`). This is the array a `dlopen` handle's local
+/// `dlsym` walks, and the bound `queue_ctors` sizes from.
+///
+/// No `realloc` when `deps` is the static `BUILTIN_DEPS` (or the head's,
+/// which musl guards with `no_realloc` for a replaced malloc; we never
+/// replace malloc, so the static check is the whole guard). Idempotent
+/// through `bfs_built`.
+///
+/// # Safety
+///
+/// `p` must be in the namespace with direct deps loaded.
+pub unsafe fn extend_bfs_deps(p: *mut Dso) {
+    unsafe {
+        if (*p).bfs_built != 0 {
+            return;
+        }
+        let mut ndeps_all = (*p).ndeps_direct;
+        let mut i = 0usize;
+        while !(*(*p).deps.add(i)).is_null() {
+            (**(*p).deps.add(i)).mark = 1;
+            i += 1;
+        }
+        let mut j = 0usize;
+        // The caller's direct-deps array is never freed or written past
+        // its terminator (musl's `no_realloc` first pass): growth lands
+        // in a fresh array, later passes `realloc` it.
+        let mut fresh: *mut *mut Dso = null_mut();
+        while !(*(*p).deps.add(j)).is_null() {
+            let dep = *(*p).deps.add(j);
+            let mut cnt = 0usize;
+            let mut k = 0usize;
+            while k < (*dep).ndeps_direct {
+                if (**(*dep).deps.add(k)).mark == 0 {
+                    cnt += 1;
+                }
+                k += 1;
+            }
+            fresh = if fresh.is_null() {
+                let t = crate::malloc::malloc((ndeps_all + cnt + 1) * size_of::<*mut Dso>())
+                    as *mut *mut Dso;
+                if t.is_null() {
+                    break;
+                }
+                crate::mem::memcpy(
+                    t as *mut core::ffi::c_void,
+                    (*p).deps as *const core::ffi::c_void,
+                    (ndeps_all + 1) * size_of::<*mut Dso>(),
+                );
+                t
+            } else {
+                let t = crate::malloc::realloc(
+                    fresh as *mut core::ffi::c_void,
+                    (ndeps_all + cnt + 1) * size_of::<*mut Dso>(),
+                ) as *mut *mut Dso;
+                if t.is_null() {
+                    break;
+                }
+                t
+            };
+            (*p).deps = fresh;
+            let mut m = 0usize;
+            while m < (*dep).ndeps_direct {
+                let dd = *(*dep).deps.add(m);
+                if (*dd).mark == 0 {
+                    (*dd).mark = 1;
+                    *(*p).deps.add(ndeps_all) = dd;
+                    ndeps_all += 1;
+                }
+                m += 1;
+            }
+            *(*p).deps.add(ndeps_all) = null_mut();
+            j += 1;
+        }
+        (*p).bfs_built = 1;
+        let mut q = HEAD.load(Ordering::Acquire);
+        while !q.is_null() {
+            (*q).mark = 0;
+            q = (*q).next;
+        }
+    }
+}
+
+/// Constructor queue in dependency-first order (musl `queue_ctors`,
+/// `dynlink.c:1513-1580`): pseudo-DFS over the direct-deps graph, so
+/// every library runs before its parents and the root runs last.
+/// Returns a NUL-terminated queue the caller frees, or null when the
+/// `calloc` fails (musl `longjmp`s at runtime; at boot the caller runs
+/// nothing — same observable outcome as musl's pre-`runtime` path).
+///
+/// The fork-consistency check (`ctor_visitor->tid < 0`,
+/// `dynlink.c:1571-1577`) is OUT: our `ctor_visitor` is a bare pointer
+/// with no tid behind it. It returns with the thread wave that owns it.
+///
+/// # Safety
+///
+/// `dso` must be in the namespace with direct deps loaded.
+pub unsafe fn queue_ctors(dso: *mut Dso) -> *mut *mut Dso {
+    unsafe {
+        let mut cnt = 0usize;
+        if (*dso).bfs_built != 0 {
+            let mut i = 0usize;
+            while !(*(*dso).deps.add(i)).is_null() {
+                (**(*dso).deps.add(i)).mark = 0;
+                i += 1;
+            }
+            cnt = i + 1;
+        } else {
+            let mut p = HEAD.load(Ordering::Acquire);
+            while !p.is_null() {
+                (*p).mark = 0;
+                cnt += 1;
+                p = (*p).next;
+            }
+        }
+        cnt += 1;
+        let queue = crate::malloc::calloc(cnt, size_of::<*mut Dso>()) as *mut *mut Dso;
+        if queue.is_null() {
+            return null_mut();
+        }
+        let mut qpos = 0usize;
+        let mut spos = cnt;
+        *queue.add(spos - 1) = dso;
+        spos -= 1;
+        (*dso).next_dep = 0;
+        (*dso).mark = 1;
+        while spos < cnt {
+            let mut p = *queue.add(spos);
+            spos += 1;
+            while (*p).next_dep < (*p).ndeps_direct {
+                let d = *(*p).deps.add((*p).next_dep);
+                if (*d).mark != 0 {
+                    (*p).next_dep += 1;
+                } else {
+                    *queue.add(spos - 1) = p;
+                    spos -= 1;
+                    p = d;
+                    (*p).next_dep = 0;
+                    (*p).mark = 1;
+                }
+            }
+            *queue.add(qpos) = p;
+            qpos += 1;
+        }
+        *queue.add(qpos) = null_mut();
+        let mut i = 0usize;
+        while i < qpos {
+            (**queue.add(i)).mark = 0;
+            i += 1;
+        }
+        queue
+    }
+}
+
+/// The init/fini exclusion lock (musl `init_fini_lock`, zero-init like
+/// every other loader mutex: no FS needed, so boot-time ctors work).
+static mut INIT_FINI_LOCK: crate::sync::MutexT = [0; 5];
+
+/// Run a constructor queue (musl `do_init_fini`, `dynlink.c:1582-1620`):
+/// `DT_INIT` then `DT_INIT_ARRAY` per object, `constructed = 1` after.
+/// Exactly-once across threads: the flag check-and-claim runs under
+/// `INIT_FINI_LOCK`, and a thread finding another thread's claim spins
+/// (musl's `pthread_cond_wait` on the same lock; a spin is the same
+/// wait without the condvar — ponytail: cond when ctor contention is
+/// measured). The lock is never held across user code, so a
+/// constructor calling back into `dlopen` cannot deadlock; a claim by
+/// the calling thread itself (`ctor_visitor == self`, only possible
+/// reentrantly) proceeds inline like musl's.
+///
+/// FS-base 0 (boot ctors run before `__init_libc` sets the TP) is
+/// harmless: no thread exists yet, so claim `visitor == self == 0`
+/// cannot race.
+///
+/// `DT_FINI`/`DT_FINI_ARRAY` are parsed nowhere: `dlclose` never
+/// unloads (tested no-op), so there is nobody to run them. They land
+/// with a `dlclose` that has teeth.
+///
+/// # Safety
+///
+/// `queue` must be a NUL-terminated `queue_ctors` product; caller frees
+/// it afterwards.
+pub unsafe fn do_init_fini(queue: *mut *mut Dso) {
+    unsafe {
+        let this = crate::thread::create::__pthread_self();
+        let mut i = 0usize;
+        while !(*queue.add(i)).is_null() {
+            let p = *queue.add(i);
+            // Claim: skip constructed, spin on foreign claims.
+            loop {
+                crate::sync::pthread_mutex_lock(addr_of_mut!(INIT_FINI_LOCK));
+                let v = (*p).ctor_visitor;
+                if (*p).constructed != 0 {
+                    crate::sync::pthread_mutex_unlock(addr_of_mut!(INIT_FINI_LOCK));
+                    break;
+                }
+                if v.is_null() || core::ptr::eq(v, this) {
+                    (*p).ctor_visitor = this;
+                    crate::sync::pthread_mutex_unlock(addr_of_mut!(INIT_FINI_LOCK));
+                    break;
+                }
+                crate::sync::pthread_mutex_unlock(addr_of_mut!(INIT_FINI_LOCK));
+                core::hint::spin_loop();
+            }
+            if (*p).constructed != 0 {
+                i += 1;
+                continue;
+            }
+            // Run with no lock held (musl unlocks across user code).
+            let mut dynv = [0usize; DYN_CNT];
+            super::dso::decode_vec((*p).dynv, dynv.as_mut_ptr(), DYN_CNT);
+            type Ctor = unsafe extern "C" fn();
+            if dynv[0] & (1usize << DT_INIT) != 0 && dynv[DT_INIT] != 0 {
+                let f: Ctor = core::mem::transmute::<usize, Ctor>(
+                    ((*p).base as usize).wrapping_add(dynv[DT_INIT]),
+                );
+                f();
+            }
+            if dynv[0] & (1usize << DT_INIT_ARRAY) != 0 {
+                let n = dynv[DT_INIT_ARRAYSZ] / size_of::<usize>();
+                let mut fns = ((*p).base as usize).wrapping_add(dynv[DT_INIT_ARRAY]) as *mut usize;
+                let mut k = 0usize;
+                while k < n {
+                    let f: Ctor = core::mem::transmute::<usize, Ctor>(*fns);
+                    if !(f as usize == 0) {
+                        f();
+                    }
+                    fns = fns.add(1);
+                    k += 1;
+                }
+            }
+            crate::sync::pthread_mutex_lock(addr_of_mut!(INIT_FINI_LOCK));
+            (*p).ctor_visitor = core::ptr::null_mut();
+            (*p).constructed = 1;
+            crate::sync::pthread_mutex_unlock(addr_of_mut!(INIT_FINI_LOCK));
+            i += 1;
+        }
     }
 }
 
@@ -693,6 +933,174 @@ mod tests {
             let mut none = [DT_NULL, 0usize];
             d.dynv = none.as_mut_ptr();
             assert_eq!(count_needed(&d as *const Dso), 0);
+        }
+    }
+
+    /// Diamond direct deps: app→{B,C}, B→D, C→D. Wire them by hand
+    /// (namespace order app,B,C,D, direct arrays on the stack).
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn wire_diamond(
+        app: *mut Dso,
+        b: *mut Dso,
+        c: *mut Dso,
+        d: *mut Dso,
+        app_d: *mut *mut Dso,
+        b_d: *mut *mut Dso,
+        c_d: *mut *mut Dso,
+        d_d: *mut *mut Dso,
+    ) {
+        unsafe {
+            reset_namespace();
+            for o in [app, b, c, d] {
+                append_namespace(o);
+            }
+            (*app).deps = app_d;
+            (*app).ndeps_direct = 2;
+            (*b).deps = b_d;
+            (*b).ndeps_direct = 1;
+            (*c).deps = c_d;
+            (*c).ndeps_direct = 1;
+            (*d).deps = d_d;
+            (*d).ndeps_direct = 0;
+        }
+    }
+
+    /// `extend_bfs_deps`: transitive closure, D once, `bfs_built` set,
+    /// second call a no-op.
+    #[test]
+    fn extend_bfs_builds_deduped_closure() {
+        let _guard = lock();
+        unsafe {
+            let mut app = zeroed_dso();
+            let mut b = zeroed_dso();
+            let mut c = zeroed_dso();
+            let mut d = zeroed_dso();
+            let (ap, bp, cp, dp) = (
+                &mut app as *mut Dso,
+                &mut b as *mut Dso,
+                &mut c as *mut Dso,
+                &mut d as *mut Dso,
+            );
+            let mut app_d = [bp, cp, null_mut()];
+            let mut b_d = [dp, null_mut()];
+            let mut c_d = [dp, null_mut()];
+            let mut d_d = [null_mut()];
+            wire_diamond(
+                ap,
+                bp,
+                cp,
+                dp,
+                app_d.as_mut_ptr(),
+                b_d.as_mut_ptr(),
+                c_d.as_mut_ptr(),
+                d_d.as_mut_ptr(),
+            );
+            extend_bfs_deps(ap);
+            assert_eq!((*ap).bfs_built, 1);
+            let mut got = [null_mut(); 4];
+            let mut n = 0usize;
+            while !(*(*ap).deps.add(n)).is_null() {
+                got[n] = *(*ap).deps.add(n);
+                n += 1;
+            }
+            assert_eq!(n, 3, "B,C plus D once");
+            assert_eq!(got[0], bp);
+            assert_eq!(got[1], cp);
+            assert_eq!(got[2], dp);
+            let before = (*ap).deps;
+            extend_bfs_deps(ap);
+            assert!(core::ptr::eq((*ap).deps, before), "idempotent");
+            crate::malloc::free((*ap).deps as *mut core::ffi::c_void);
+            reset_namespace();
+            unregister_all();
+        }
+    }
+
+    /// `queue_ctors`: dependencies before parents, root last,
+    /// NUL-terminated.
+    #[test]
+    fn queue_ctors_orders_deps_first() {
+        let _guard = lock();
+        unsafe {
+            let mut app = zeroed_dso();
+            let mut b = zeroed_dso();
+            let mut c = zeroed_dso();
+            let mut d = zeroed_dso();
+            let (ap, bp, cp, dp) = (
+                &mut app as *mut Dso,
+                &mut b as *mut Dso,
+                &mut c as *mut Dso,
+                &mut d as *mut Dso,
+            );
+            let mut app_d = [bp, cp, null_mut()];
+            let mut b_d = [dp, null_mut()];
+            let mut c_d = [dp, null_mut()];
+            let mut d_d = [null_mut()];
+            wire_diamond(
+                ap,
+                bp,
+                cp,
+                dp,
+                app_d.as_mut_ptr(),
+                b_d.as_mut_ptr(),
+                c_d.as_mut_ptr(),
+                d_d.as_mut_ptr(),
+            );
+            let q = queue_ctors(ap);
+            assert!(!q.is_null());
+            let mut v = [null_mut(); 5];
+            let mut n = 0usize;
+            while !(*q.add(n)).is_null() {
+                v[n] = *q.add(n);
+                n += 1;
+            }
+            assert_eq!(n, 4);
+            assert!(v.contains(&dp));
+            assert_eq!(v[3], ap, "root runs last");
+            let di = v.iter().position(|x| *x == dp).unwrap();
+            let bi = v.iter().position(|x| *x == bp).unwrap();
+            let ci = v.iter().position(|x| *x == cp).unwrap();
+            assert!(di < bi && di < ci, "D before its parents");
+            crate::malloc::free(q as *mut core::ffi::c_void);
+            reset_namespace();
+            unregister_all();
+        }
+    }
+
+    static CTOR_RAN: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn test_ctor() {
+        CTOR_RAN.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// `do_init_fini`: runs `DT_INIT_ARRAY` once, marks constructed,
+    /// second run is a no-op.
+    #[test]
+    fn do_init_fini_runs_once_and_marks() {
+        let _guard = lock();
+        CTOR_RAN.store(0, Ordering::SeqCst);
+        unsafe {
+            let mut d = zeroed_dso();
+            // base 0 with absolute addresses: the array holds fn
+            // pointers, the tag points at the array.
+            let fns = [test_ctor as *const () as usize];
+            let mut dynv = [
+                DT_INIT_ARRAY,
+                fns.as_ptr() as usize,
+                DT_INIT_ARRAYSZ,
+                size_of::<usize>(),
+                DT_NULL,
+                0usize,
+            ];
+            d.dynv = dynv.as_mut_ptr();
+            d.base = core::ptr::null_mut();
+            let dp = &mut d as *mut Dso;
+            let mut q = [dp, null_mut()];
+            do_init_fini(q.as_mut_ptr());
+            assert_eq!(CTOR_RAN.load(Ordering::SeqCst), 1);
+            assert_eq!((*dp).constructed, 1);
+            do_init_fini(q.as_mut_ptr());
+            assert_eq!(CTOR_RAN.load(Ordering::SeqCst), 1, "exactly once");
         }
     }
 }

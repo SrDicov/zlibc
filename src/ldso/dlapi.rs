@@ -16,8 +16,9 @@
 //!   `RTLD_NEXT` searches globally but starting after the caller's own
 //!   object.
 //!
-//! `dlopen` is the load-bearing half and lands with the path search; the
-//! pieces here are what `dlopen` itself calls.
+//! `dlopen` is the load-bearing half and lands here, on top of the
+//! path search and the ctor queue; the pieces below are what `dlopen`
+//! itself calls.
 
 use core::ffi::{c_char, c_int, c_void};
 use core::ptr::null_mut;
@@ -27,7 +28,8 @@ use super::dso::Dso;
 use super::linkmap;
 use super::reloc::find_sym;
 
-/// musl `RTLD_NOLOAD` (`include/dlfcn.h:8`).
+/// musl `RTLD_LAZY` (`include/dlfcn.h:8`): accepted; binding is
+/// always eager (no lazy PLT infrastructure), so it is unobservable.
 pub const RTLD_LAZY: c_int = 1;
 /// musl `RTLD_NOW` (`include/dlfcn.h:7`).
 pub const RTLD_NOW: c_int = 2;
@@ -346,6 +348,162 @@ pub unsafe extern "C" fn __dlsym(
     unsafe { do_dlsym(handle, name, ra) }
 }
 
+/// The `dlopen` exclusion lock. Boot never contends (single-threaded);
+/// concurrent `dlopen`s serialize here. Constructors run after release
+/// (musl drops its rwlock before `do_init_fini`), so a constructor
+/// calling back into `dlopen` cannot deadlock on this lock.
+#[cfg(target_arch = "x86_64")]
+static mut DLOPEN_LOCK: crate::sync::MutexT = [0; 5];
+
+/// Already-loaded object for an `RTLD_NOLOAD` lookup (musl resolves the
+/// flag inside `load_library`, `dynlink.c:1062-1110`; same two layers
+/// here: shortname for bare names, full-path scan otherwise). Null when
+/// absent — no loading, no error set (the caller picks the message).
+///
+/// # Safety
+///
+/// `file` must be NUL-terminated and non-empty.
+#[cfg(target_arch = "x86_64")]
+unsafe fn find_loaded(file: *const c_char) -> *mut Dso {
+    unsafe {
+        let mut slash = false;
+        let mut k = 0usize;
+        while *file.add(k) != 0 {
+            if *file.add(k) == b'/' as c_char {
+                slash = true;
+            }
+            k += 1;
+        }
+        if !slash {
+            return linkmap::find_by_shortname(file);
+        }
+        let mut q = linkmap::head();
+        while !q.is_null() {
+            if !(*q).name.is_null() && super::reloc::streq((*q).name, file) {
+                return q;
+            }
+            q = (*q).next;
+        }
+        null_mut()
+    }
+}
+
+/// True when any object loaded for this `dlopen` (from `p` to the
+/// namespace tail) carries `PT_TLS`. Runtime TLS installation
+/// (`install_new_tls`, musl `dynlink.c:2207-2209`) is OUT: without it a
+/// late TLS module would corrupt the static-TLS layout, so the load is
+/// refused loudly instead of silently.
+///
+/// # Safety
+///
+/// `p` must be in the namespace.
+#[cfg(target_arch = "x86_64")]
+unsafe fn new_tls_present(p: *mut Dso) -> bool {
+    unsafe {
+        let mut q = p;
+        while !q.is_null() {
+            if !(*q).phdr.is_null() && (*q).phnum > 0 {
+                let mut i = 0usize;
+                while i < (*q).phnum as usize {
+                    let ph = &*(*q)
+                        .phdr
+                        .wrapping_byte_add(i * (*q).phentsize)
+                        .cast::<super::Elf64Phdr>();
+                    if ph.p_type == super::PT_TLS {
+                        return true;
+                    }
+                    i += 1;
+                }
+            }
+            q = (*q).next;
+        }
+        false
+    }
+}
+
+/// musl `dlopen` (`ldso/dynlink.c:2105-2231`): `NULL` returns the head,
+/// otherwise load, wire deps (`load_deps` + BFS closure for
+/// handle-local `dlsym`), publish symbols (`RTLD_GLOBAL` keeps them,
+/// else `revert_syms`), relocate the new objects, run constructors
+/// after releasing the lock, and return the handle.
+///
+/// Deliberately OUT (each with its owner): lazy binding (always eager,
+/// so `RTLD_LAZY` is unobservable), `install_new_tls` (late TLS modules
+/// are refused, see [`new_tls_present`]), failure rollback (nothing
+/// ever unloads — a failed `dlopen` leaves the mappings for the retry,
+/// which finds them loaded and finishes the job), and the
+/// shutting-down guard (no exit machinery yet).
+///
+/// # Safety
+///
+/// `file` must be null or NUL-terminated.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn dlopen(file: *const c_char, mode: c_int) -> *mut c_void {
+    unsafe {
+        use core::ptr::addr_of_mut;
+        crate::sync::pthread_mutex_lock(addr_of_mut!(DLOPEN_LOCK));
+        let head = linkmap::head();
+        if file.is_null() {
+            crate::sync::pthread_mutex_unlock(addr_of_mut!(DLOPEN_LOCK));
+            return head as *mut c_void;
+        }
+        let noload = mode & RTLD_NOLOAD != 0;
+        let p = if noload {
+            find_loaded(file)
+        } else {
+            super::boot::load_library(file, head)
+        };
+        if p.is_null() {
+            set_error(if noload {
+                b"Library is not already loaded"
+            } else {
+                b"Error loading shared library"
+            });
+            crate::sync::pthread_mutex_unlock(addr_of_mut!(DLOPEN_LOCK));
+            return null_mut();
+        }
+        if !linkmap::load_deps(p, super::boot::load_library) {
+            set_error(b"Error loading dependencies");
+            crate::sync::pthread_mutex_unlock(addr_of_mut!(DLOPEN_LOCK));
+            return null_mut();
+        }
+        linkmap::extend_bfs_deps(p);
+        if new_tls_present(p) {
+            set_error(b"TLS in dlopen'd libraries not supported");
+            crate::sync::pthread_mutex_unlock(addr_of_mut!(DLOPEN_LOCK));
+            return null_mut();
+        }
+        let orig_syms = linkmap::syms_tail();
+        linkmap::add_syms(p);
+        let mut i = 0usize;
+        while !(*(*p).deps.add(i)).is_null() {
+            linkmap::add_syms(*(*p).deps.add(i));
+            i += 1;
+        }
+        // New objects only: everything before `p` is already relocated,
+        // and `reloc_all` skips the rest by flag anyway.
+        let mut q = p;
+        while !q.is_null() {
+            super::boot::reloc_all(head, q, false);
+            q = (*q).next;
+        }
+        if mode & RTLD_GLOBAL == 0 {
+            linkmap::revert_syms(orig_syms);
+        }
+        let mut queue = null_mut();
+        if (*p).constructed == 0 {
+            queue = linkmap::queue_ctors(p);
+        }
+        crate::sync::pthread_mutex_unlock(addr_of_mut!(DLOPEN_LOCK));
+        if !queue.is_null() {
+            linkmap::do_init_fini(queue);
+            crate::malloc::free(queue as *mut core::ffi::c_void);
+        }
+        p as *mut c_void
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,6 +617,39 @@ mod tests {
             assert!(dlsym(0x1000 as *mut c_void, c"x".as_ptr()).is_null());
             let msg = dlerror();
             assert!(!msg.is_null());
+            linkmap::reset_namespace();
+        }
+    }
+
+    /// `dlopen(NULL)` returns the namespace head (musl `dynlink.c:2124`).
+    #[test]
+    fn dlopen_null_returns_head() {
+        let _guard = lock();
+        drain();
+        {
+            linkmap::reset_namespace();
+            let mut d: Dso = unsafe { core::mem::zeroed() };
+            let dp = &mut d as *mut Dso;
+            linkmap::set_namespace(dp);
+            assert_eq!(unsafe { dlopen(core::ptr::null(), 0) }, dp as *mut c_void);
+            assert!(dlerror().is_null(), "no error on the NULL path");
+            linkmap::reset_namespace();
+        }
+    }
+
+    /// `RTLD_NOLOAD` on an absent library returns null with a message
+    /// and loads nothing.
+    #[test]
+    fn dlopen_noload_miss_errors() {
+        let _guard = lock();
+        drain();
+        {
+            linkmap::reset_namespace();
+            let mut d: Dso = unsafe { core::mem::zeroed() };
+            linkmap::set_namespace(&mut d as *mut Dso);
+            let h = unsafe { dlopen(c"libghost.so".as_ptr(), RTLD_NOLOAD) };
+            assert!(h.is_null());
+            assert!(!dlerror().is_null());
             linkmap::reset_namespace();
         }
     }
