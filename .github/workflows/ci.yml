@@ -412,6 +412,15 @@ jobs:
           test "$out" = "8d ok"
           echo "gate-8d ran: $out"
 
+      - name: Build and run gate-string (string/ctype/wide)
+        run: |
+          set -e
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc smoke/gate-string.c -o /tmp/zlibc-smoke/gate-string -Wl,--dynamic-linker,$so
+          out=$(timeout 10 /tmp/zlibc-smoke/gate-string)
+          test "$out" = "string ok"
+          echo "gate-string ran: $out"
+
       - name: Diagnose cold boot on failure
         if: failure()
         run: |

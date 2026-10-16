@@ -8,6 +8,8 @@ extern crate std;
 
 pub mod abi;
 #[cfg(target_arch = "x86_64")]
+pub mod ctype;
+#[cfg(target_arch = "x86_64")]
 pub mod dirent;
 #[cfg(target_arch = "x86_64")]
 pub mod epoll;
@@ -44,6 +46,8 @@ pub mod start;
 #[cfg(target_arch = "x86_64")]
 pub mod stat;
 pub mod stdio;
+#[cfg(target_arch = "x86_64")]
+pub mod string;
 pub mod symbols;
 pub mod sync;
 pub mod syscall;
@@ -55,6 +59,8 @@ pub mod thread;
 pub mod unistd;
 #[cfg(target_arch = "x86_64")]
 pub mod validation;
+#[cfg(target_arch = "x86_64")]
+pub mod wide;
 #[cfg(target_arch = "x86_64")]
 pub mod xattr;
 
