@@ -637,13 +637,11 @@ pub unsafe fn do_relocs(
                         // resolve it at pass 1 (the app is not mapped yet).
                         // Skip the generated slot; musl leaves it for the
                         // application pass. Fatal for anything else undefined.
-                        let is_main = unsafe {
-                            *name == b'm' as i8
-                                && *name.add(1) == b'a' as i8
-                                && *name.add(2) == b'i' as i8
-                                && *name.add(3) == b'n' as i8
-                                && *name.add(4) == 0
-                        };
+                        let is_main = *name == b'm' as i8
+                            && *name.add(1) == b'a' as i8
+                            && *name.add(2) == b'i' as i8
+                            && *name.add(3) == b'n' as i8
+                            && *name.add(4) == 0;
                         if is_main {
                             p = p.add(stride);
                             left -= step;
