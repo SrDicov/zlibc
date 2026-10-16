@@ -771,6 +771,22 @@ pid); (4) en revisión, verificar cada `#[allow]` no-estándar, cada
 `O_*` raro (`O_ACCMODE=(03|O_SEARCH)` es real) y cada desvío musl
 contra el fuente, no contra el reporte.
 
+## Caza de flakes (suite determinista, `ws/6e-1`)
+
+Tres races reales, tres fixes, una regla: `cargo test` plano debe ser
+verde siempre; CI es gate, no muleta.
+
+- **Celda errno global**: todo test que falle un syscall escribe ahí;
+  el test `errno_is_per_thread` exige verla intacta. Todo assert de
+  errno-valor + todo test con syscalls fallibles (`fcntl` roundtrip
+  incluido, no solo el que aserta) comparte `testlock`, y los tres
+  viajan al step serial de CI. Los tests `dlstart` sin lock pisaban
+  `AUX_BUF` entre sí (mismo remedio).
+- **Tmpfiles**: pid no basta con hilos paralelos; tag por test.
+- **Falso positivo que casi me lleva puesto**: un rojo en push
+  solo-docs era el flake, no el commit. `git stash` + rebuild para
+  culpar al código antes de revertir a ciegas.
+
 ## "100% done" criteria
 
 - All public musl x86_64 symbols present with correct signature/ABI.
