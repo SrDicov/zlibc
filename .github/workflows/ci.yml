@@ -390,6 +390,15 @@ jobs:
           test "$out" = "process ok"
           echo "gate-process ran: $out"
 
+      - name: Build and run gate-stdio (file lifecycle + scanf)
+        run: |
+          set -e
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc smoke/gate-stdio.c -o /tmp/zlibc-smoke/gate-stdio -Wl,--dynamic-linker,$so
+          out=$(timeout 10 /tmp/zlibc-smoke/gate-stdio)
+          test "$out" = "stdio ok"
+          echo "gate-stdio ran: $out"
+
       - name: Diagnose cold boot on failure
         if: failure()
         run: |

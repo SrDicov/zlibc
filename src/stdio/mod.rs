@@ -19,7 +19,9 @@
 //! never takes the stdio lock), so no deadlock cycle exists.
 
 pub mod dtoa;
+pub mod file;
 pub mod lockfile;
+pub mod scan;
 
 use core::ffi::{c_char, c_int, c_long, c_void};
 use core::ptr::{addr_of_mut, null_mut};
