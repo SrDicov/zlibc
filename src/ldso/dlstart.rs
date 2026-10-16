@@ -202,12 +202,28 @@ pub unsafe extern "C" fn _dlstart() {
 /// jumped to the raw link address and died). Private means every call
 /// site binds direct. `#[inline(never)]` pins the out-of-line direct
 /// call (and the symbol the pre-reloc gate resolves).
+/// Zero `n` words at `p` with volatile stores (pre-reloc safe).
+///
+/// # Safety
+///
+/// `p` must be writable for `n` words.
+unsafe fn zero_words(p: *mut usize, n: usize) {
+    unsafe {
+        let mut i = 0usize;
+        while i < n {
+            core::ptr::write_volatile(p.add(i), 0);
+            i += 1;
+        }
+    }
+}
+
 #[cfg(target_arch = "x86_64")]
 #[inline(never)]
 unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usize {
     unsafe {
         let auxv = find_auxv(sp);
         let aux = core::ptr::addr_of_mut!(AUX_BUF) as *mut usize;
+        zero_words(aux, AUX_CNT);
         let mut i = 0usize;
         while *auxv.add(i) != AT_NULL {
             if *auxv.add(i) < AUX_CNT {
@@ -216,6 +232,7 @@ unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usize {
             i += 2;
         }
         let dynt = core::ptr::addr_of_mut!(DYNT_BUF) as *mut usize;
+        zero_words(dynt, DYN_CNT);
         let mut j = 0usize;
         while *dynv.add(j) != DT_NULL {
             if *dynv.add(j) < DYN_CNT {
