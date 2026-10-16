@@ -147,10 +147,17 @@ jobs:
       - name: Build the linkable libc (cdylib)
         run: cargo build --release --verbose --target x86_64-unknown-linux-musl
 
+      - name: Link the interpreter (musl two-stage shape)
+        run: |
+          a=$(echo target/x86_64-unknown-linux-musl/release/libzlibc.a)
+          test -f "$a"
+          mkdir -p /tmp/zlibc-smoke
+          cc -nostdlib -shared -Wl,-e,_dlstart \
+            -o /tmp/zlibc-smoke/ld-musl-x86_64.so.1 "$a"
+
       - name: Inspect the interpreter candidate
         run: |
-          so=$(echo target/x86_64-unknown-linux-musl/release/libzlibc.so)
-          test -f "$so"
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
           echo "== entry =="
           readelf -h "$so" | grep -i entry
           echo "== UNDEF imports (want: none) =="
@@ -159,8 +166,6 @@ jobs:
           echo "== _dlstart exported =="
           nm -D --defined-only "$so" | grep -w _dlstart
           echo "== hello's view of libc =="
-          mkdir -p /tmp/zlibc-smoke
-          cp "$so" /tmp/zlibc-smoke/ld-musl-x86_64.so.1
           musl-gcc -Wl,--dynamic-linker,/tmp/zlibc-smoke/ld-musl-x86_64.so.1 \
             -o /tmp/zlibc-smoke/hello-a smoke/hello-a.c
           readelf -d /tmp/zlibc-smoke/hello-a | grep -iE 'interp|needed'

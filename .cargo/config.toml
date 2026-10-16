@@ -2,11 +2,8 @@
 # x86_64-unknown-linux-musl on purpose: global RUSTFLAGS would poison
 # the host build scripts (same lesson as hello/build.rs).
 #
-# - panic=abort: no unwinder, no personality item needed in a freestanding cdylib.
-# - link-arg=-nostdlib: the file IS the libc; linking the sysroot libc
-#   would duplicate every symbol (multiple definition at best,
-#   accidental interposition at worst).
-# - link-arg=-Wl,-e,_dlstart: the ELF entry, like musl's own
-#   `-Wl,-e,_dlstart` (musl Makefile:162-163).
+# - panic=abort: no unwinder anywhere in the freestanding objects.
+# (The final `-shared` link below adds `-nostdlib -e _dlstart` itself;
+# no link-args here because the archive stage does not link.)
 [target.x86_64-unknown-linux-musl]
-rustflags = ["-C", "panic=abort", "-C", "link-arg=-nostdlib", "-C", "link-arg=-Wl,-e,_dlstart"]
+rustflags = ["-C", "panic=abort"]
