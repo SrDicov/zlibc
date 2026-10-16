@@ -81,6 +81,43 @@ pub unsafe fn futex_wait_shared(addr: *mut c_int, val: c_int) -> isize {
     }
 }
 
+/// Sleep while `*addr == val` until `ts` (absolute timeout), private op.
+///
+/// musl `__timedwait` (`src/thread/__timedwait.c`): `FUTEX_WAIT` with an
+/// absolute `struct timespec` (null = indefinite, like
+/// [`futex_wait_private`]). Returns the raw kernel result (`-ETIMEDOUT`
+/// on expiry, negative errno on error).
+///
+/// # Safety
+///
+/// Same as [`futex_wait_private`], plus `ts` must be null or point to a
+/// readable `Timespec`.
+pub unsafe fn futex_wait_private_timeout(
+    addr: *mut c_int,
+    val: c_int,
+    ts: *const crate::time::Timespec,
+) -> isize {
+    unsafe {
+        let r = syscall4(
+            SYS_FUTEX,
+            addr as usize,
+            (FUTEX_WAIT | FUTEX_PRIVATE) as usize,
+            val as usize,
+            ts as usize,
+        );
+        if r != -(ENOSYS as isize) {
+            return r;
+        }
+        syscall4(
+            SYS_FUTEX,
+            addr as usize,
+            FUTEX_WAIT as usize,
+            val as usize,
+            ts as usize,
+        )
+    }
+}
+
 /// Wake up to `cnt` sleepers (`cnt < 0` wakes all), private op.
 ///
 /// Same `-ENOSYS` fallback as musl `pthread_impl.h:168-174` (`__wake`).

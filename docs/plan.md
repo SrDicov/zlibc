@@ -814,6 +814,29 @@ Reglas nuevas: `c"..."` literals (clippy `manual_c_str_literals` niega
 `b"...\0"`); `#[unsafe(naked)]` literal para variadics (el gate no ve
 dentro de `va_trampoline!`); probe ABI 114 -> 142 asserts.
 
+## Ola 11 (threads/sync/malloc/ldso, `ws/6e-1`): 751 -> 877 simbolos
+
+Entregado y verde: TSD (`key_create/delete/getspecific/setspecific` +
+`tss_*`, destructores en `child_entry`/`pthread_exit`), `once` (protocolo
+futex 0/1/2/3), `exit`/`cancel`/`testcancel`/`setcancelstate/type`
+(solo-deferred, sin `SIGCANCEL` — documentado), `atfork` (cableado en
+`fork`), `kill`/`sigmask`, familia `sched_*` + `pthread_*sched*`/`affinity`
+/`getcpuclockid`/`name_np`/`getattr_np`/`attr_default_np`/`timedjoin`/
+`tryjoin`/`concurrency`, attrs mutex/cond/rwlock/barrier completas,
+`mutex_timedlock`/`consistent`/`prioceiling`, `cond_timedwait`,
+rwlock (writers-preference) + timed, barrier de dos generaciones, spin,
+sem unnamed+shm-named, C11 `thrd/mtx/cnd`, `membarrier`, `valloc`/
+`pvalloc`/`malloc_usable_size`/`reallocarray`, `dladdr`(stub musl-fiel)/
+`dlinfo`/`dl_iterate_phdr`, `__libc_exit_fini` real + `do_fini_all`.
+
+Cazas: (1) tests sobre TP de glibc del harness (leer/escribir `Thread`
+ajeno cuelga) — cuerpos en workers propios; (2) layout test anclado a
+136/160 bytes (`Thread` 1176, TLS 1200 con tsd); (3) `sched_getaffinity`
+devuelve count, no 0 — forma `do_getaffinity` musl; (4) `setprotocol(2)`
+es `ENOTSUP` en musl, no stored; (5) `sem_open` por `shm_open(name)`, no
+path construido (mapname rechaza `/`); (6) `encrypt` opera en bit0
+(test comparaba bytes); (7) rotaciones DES de 28 bits.
+
 ## "100% done" criteria
 
 - All public musl x86_64 symbols present with correct signature/ABI.

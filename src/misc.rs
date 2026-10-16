@@ -367,6 +367,18 @@ pub unsafe extern "C" fn memfd_create(name: *const c_char, flags: c_uint) -> c_i
     unsafe { syscall_ret(syscall2(SYS_MEMFD_CREATE, name as usize, flags as usize)) as c_int }
 }
 
+/// Memory barrier across threads (musl: direct `SYS_membarrier` trap,
+/// `__NR_membarrier` 324).
+///
+/// # Safety
+///
+/// Pure value call; `flags` must be 0 on current kernels.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn membarrier(cmd: c_int, flags: c_uint) -> c_int {
+    unsafe { syscall_ret(syscall2(324, cmd as usize, flags as usize)) as c_int }
+}
+
 #[cfg(test)]
 #[cfg(target_arch = "x86_64")]
 mod tests {

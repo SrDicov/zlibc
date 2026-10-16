@@ -174,7 +174,9 @@ pub unsafe extern "C" fn fork() -> c_int {
     unsafe {
         let mut set: sigset_t = [0; 16];
         __block_app_sigs(&mut set);
+        crate::thread::create::run_atfork(0);
         let ret = _Fork();
+        crate::thread::create::run_atfork(if ret == 0 { 2 } else { 1 });
         __restore_sigs(&set);
         ret
     }

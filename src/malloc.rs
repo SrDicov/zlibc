@@ -573,9 +573,83 @@ pub unsafe extern "C" fn memalign(alignment: usize, size: usize) -> *mut c_void 
     }
 }
 
+/// Page-aligned allocation (musl `valloc`: `memalign` at page size).
+///
+/// # Safety
+///
+/// Same validity contract as [`malloc`], plus page alignment.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn valloc(size: usize) -> *mut c_void {
+    unsafe { memalign(crate::ldso::PAGE_SIZE, size) }
+}
+
+/// Page-rounded allocation (musl `pvalloc`: `memalign` at page size
+/// with the size rounded up to a page).
+///
+/// # Safety
+///
+/// Same validity contract as [`valloc`].
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn pvalloc(size: usize) -> *mut c_void {
+    unsafe {
+        let up = size.wrapping_add(crate::ldso::PAGE_SIZE - 1) & !(crate::ldso::PAGE_SIZE - 1);
+        if up < size {
+            set_oom();
+            return null_mut();
+        }
+        memalign(crate::ldso::PAGE_SIZE, up.max(1))
+    }
+}
+
+/// Usable bytes behind a live payload, 0 for null (musl
+/// `malloc_usable_size`: no lock needed for the side-map read... takes
+/// the lock like every other query path here).
+///
+/// # Safety
+///
+/// `p` must be null or a live object from this allocator.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn malloc_usable_size(p: *mut c_void) -> usize {
+    unsafe {
+        if p.is_null() {
+            return 0;
+        }
+        lock();
+        let n = usable(p as usize);
+        unlock();
+        n
+    }
+}
+
+/// Overflow-checked resize (musl `reallocarray`: `m*n` overflow is
+/// `ENOMEM` + NULL, never a wrapped size).
+///
+/// # Safety
+///
+/// Same contract as [`realloc`].
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn reallocarray(p: *mut c_void, m: usize, n: usize) -> *mut c_void {
+    unsafe {
+        match m.checked_mul(n) {
+            Some(t) => realloc(p, t),
+            None => {
+                set_oom();
+                null_mut()
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{aligned_alloc, calloc, free, malloc, memalign, posix_memalign, realloc, EINVAL};
+    use super::{
+        aligned_alloc, calloc, free, malloc, malloc_usable_size, memalign, posix_memalign, pvalloc,
+        realloc, reallocarray, valloc, EINVAL,
+    };
     use core::hint::black_box;
     use core::ptr::null_mut;
 
@@ -842,6 +916,40 @@ mod tests {
         while k < 4 {
             hs[k].take().unwrap().join().unwrap();
             k += 1;
+        }
+    }
+
+    #[test]
+    fn aligned_page_helpers() {
+        unsafe {
+            let v = valloc(100);
+            assert!(!v.is_null());
+            assert_eq!(v as usize % 4096, 0);
+            assert!(malloc_usable_size(v) >= 100);
+            free(v);
+            let p = pvalloc(4097);
+            assert!(!p.is_null());
+            assert_eq!(p as usize % 4096, 0);
+            assert!(malloc_usable_size(p) >= 4097);
+            free(p);
+            assert_eq!(malloc_usable_size(core::ptr::null_mut()), 0);
+        }
+    }
+
+    #[test]
+    fn reallocarray_checks_overflow() {
+        unsafe {
+            let q = reallocarray(core::ptr::null_mut(), 8, 16);
+            assert!(!q.is_null());
+            assert!(malloc_usable_size(q) >= 128);
+            free(q);
+            assert!(reallocarray(core::ptr::null_mut(), usize::MAX, 2).is_null());
+            let a = reallocarray(core::ptr::null_mut(), 4, 8);
+            assert!(!a.is_null());
+            let b = reallocarray(a, 4, 32);
+            assert!(!b.is_null());
+            assert!(malloc_usable_size(b) >= 128);
+            free(b);
         }
     }
 }

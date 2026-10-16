@@ -22,7 +22,10 @@ use core::ptr::{addr_of_mut, null_mut};
 use core::sync::atomic::{AtomicPtr, Ordering};
 
 use super::dso::Dso;
-use super::{DT_INIT, DT_INIT_ARRAY, DT_INIT_ARRAYSZ, DT_NEEDED, DYN_CNT};
+use super::{
+    DT_FINI, DT_FINI_ARRAY, DT_FINI_ARRAYSZ, DT_INIT, DT_INIT_ARRAY, DT_INIT_ARRAYSZ, DT_NEEDED,
+    DYN_CNT,
+};
 
 // Namespace (musl `head`/`tail`, `dynlink.c:141`) and the scope tail
 // (`syms_tail`). `#[no_mangle]`-adjacent loader state has no thread
@@ -529,6 +532,99 @@ pub unsafe fn do_init_fini(queue: *mut *mut Dso) {
             crate::sync::pthread_mutex_unlock(addr_of_mut!(INIT_FINI_LOCK));
             i += 1;
         }
+    }
+}
+
+/// Run destructors in reverse load order (musl `__libc_exit_fini`
+/// shape extended to DSOs: `DT_FINI_ARRAY` back-to-front, then `DT_FINI`
+/// per object, tail-to-head. musl proper only runs the main program's
+/// fini array here (exit.c:20-26); DSO destructors additionally run
+/// because `dlclose` never unmaps — exit is their only chance.
+///
+/// # Safety
+///
+/// Runs arbitrary guest destructors; call once at process exit.
+pub unsafe fn do_fini_all() {
+    unsafe {
+        // Snapshot the chain: destructors may dlopen (musl tolerates it;
+        // new tails simply do not run this pass).
+        let mut n = 0usize;
+        let mut q = tail();
+        while !q.is_null() {
+            n += 1;
+            q = (*q).prev;
+        }
+        // Walk tail-to-head without holding the init/fini lock across
+        // user code (same discipline as `do_init_fini`).
+        let mut q = tail();
+        let mut left = n;
+        while !q.is_null() && left > 0 {
+            left -= 1;
+            let p = q;
+            q = (*p).prev;
+            type Dtor = unsafe extern "C" fn();
+            let mut dynv = [0usize; DYN_CNT];
+            super::dso::decode_vec((*p).dynv, dynv.as_mut_ptr(), DYN_CNT);
+            if dynv[0] & (1usize << DT_FINI_ARRAY) != 0 {
+                let count = dynv[DT_FINI_ARRAYSZ] / size_of::<usize>();
+                let fns = ((*p).base as usize).wrapping_add(dynv[DT_FINI_ARRAY]) as *mut usize;
+                let mut k = count;
+                while k > 0 {
+                    k -= 1;
+                    let f: Dtor = core::mem::transmute::<usize, Dtor>(*fns.add(k));
+                    if !(f as usize == 0) {
+                        f();
+                    }
+                }
+            }
+            if dynv[0] & (1usize << DT_FINI) != 0 && dynv[DT_FINI] != 0 {
+                let f: Dtor = core::mem::transmute::<usize, Dtor>(
+                    ((*p).base as usize).wrapping_add(dynv[DT_FINI]),
+                );
+                f();
+            }
+        }
+    }
+}
+
+/// Linker-provided fini-array bounds (musl reads `__fini_array_start/end`
+/// from crt; our `-nostdlib` link has no crt, so we anchor them here as
+/// empty. The version script keeps them out of `.dynsym` (non-baseline).
+/// If the link ever gains crt objects that define these, delete these.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub static __fini_array_start: [usize; 0] = [];
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub static __fini_array_end: [usize; 0] = [];
+
+/// Real exit-time finalizer (musl `exit.c:20-26` shape: own
+/// `__fini_array` back-to-front, then `_fini`; DSO destructors via
+/// [`do_fini_all`]). Overrides the weak dummy in `crate::start`.
+///
+/// # Safety
+///
+/// Runs arbitrary destructors; call once from `exit`.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __libc_exit_fini() {
+    unsafe {
+        extern "C" {
+            static __fini_array_start: *const usize;
+            static __fini_array_end: *const usize;
+            fn _fini();
+        }
+        let mut a = __fini_array_end as usize;
+        let lo = __fini_array_start as usize;
+        while a > lo {
+            a -= size_of::<usize>();
+            let f: unsafe extern "C" fn() = core::mem::transmute(*(a as *const usize));
+            if !(f as usize == 0) {
+                f();
+            }
+        }
+        _fini();
+        do_fini_all();
     }
 }
 

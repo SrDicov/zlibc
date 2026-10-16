@@ -439,6 +439,15 @@ jobs:
           test "$out" = "netdb ok"
           echo "gate-netdb ran: $out"
 
+      - name: Build and run gate-sync (once/TSD/rwlock/barrier/sem/C11)
+        run: |
+          set -e
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc smoke/gate-sync.c -o /tmp/zlibc-smoke/gate-sync -Wl,--dynamic-linker,$so
+          out=$(timeout 15 /tmp/zlibc-smoke/gate-sync)
+          test "$out" = "sync ok"
+          echo "gate-sync ran: $out"
+
       - name: Diagnose cold boot on failure
         if: failure()
         run: |

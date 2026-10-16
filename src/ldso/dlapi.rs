@@ -504,8 +504,187 @@ pub unsafe extern "C" fn dlopen(file: *const c_char, mode: c_int) -> *mut c_void
     }
 }
 
+// ---- 11C: addr/info/iterate + fini ---------------------------------------------------
+/// musl `Dl_info` (`include/link.h` via `dlfcn.h`).
+#[cfg(target_arch = "x86_64")]
+#[repr(C)]
+pub struct DlInfo {
+    pub dli_fname: *const c_char,
+    pub dli_fbase: *mut c_void,
+    pub dli_sname: *const c_char,
+    pub dli_saddr: *mut c_void,
+}
+
+/// Address to object query (musl `src/ldso/dladdr.c`: pure stub,
+/// always 0).
+///
+/// # Safety
+///
+/// `info` must point to a writable `DlInfo` (untouched on failure).
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn dladdr(_addr: *const c_void, _info: *mut DlInfo) -> c_int {
+    0
+}
+
+/// musl `RTLD_DI_LINKMAP` (`include/dlfcn.h:20`).
+#[cfg(target_arch = "x86_64")]
+pub const RTLD_DI_LINKMAP: c_int = 2;
+
+/// Object query (musl `src/ldso/dlinfo.c`: handle check, only
+/// `RTLD_DI_LINKMAP`, stores the object itself as its link map).
+///
+/// # Safety
+///
+/// `handle` must be null or a loader handle; `res` writable for a pointer.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn dlinfo(handle: *mut c_void, req: c_int, res: *mut *mut c_void) -> c_int {
+    unsafe {
+        if res.is_null() {
+            return -1;
+        }
+        let mut q = linkmap::head();
+        let mut ok = false;
+        while !q.is_null() {
+            if core::ptr::eq(q as *mut c_void, handle) {
+                ok = true;
+                break;
+            }
+            q = (*q).next;
+        }
+        if !ok {
+            set_error(b"Invalid library handle");
+            return -1;
+        }
+        if req != RTLD_DI_LINKMAP {
+            set_error(b"Unsupported request");
+            return -1;
+        }
+        *res = handle;
+        0
+    }
+}
+
+/// musl `struct dl_phdr_info` (`include/link.h:77-88`).
+#[cfg(target_arch = "x86_64")]
+#[repr(C)]
+pub struct DlPhdrInfo {
+    pub dlpi_addr: usize,
+    pub dlpi_name: *const c_char,
+    pub dlpi_phdr: *const super::Elf64Phdr,
+    pub dlpi_phnum: u16,
+    pub dlpi_adds: u64,
+    pub dlpi_subs: u64,
+    pub dlpi_tls_modid: usize,
+    pub dlpi_tls_data: *mut c_void,
+}
+
+/// Walk loaded objects (musl `dynlink.c:2401`: head-to-tail, callback
+/// stops the walk on nonzero return; TLS slots report 0 — static TLS
+/// has no per-object runtime block here).
+///
+/// # Safety
+///
+/// The callback must be a valid function; it runs synchronously.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn dl_iterate_phdr(
+    cb: Option<unsafe extern "C" fn(*mut DlPhdrInfo, usize, *mut c_void) -> c_int>,
+    data: *mut c_void,
+) -> c_int {
+    unsafe {
+        let Some(f) = cb else {
+            return 0;
+        };
+        let mut cur = linkmap::head();
+        while !cur.is_null() {
+            let mut info = DlPhdrInfo {
+                dlpi_addr: (*cur).base as usize,
+                dlpi_name: (*cur).name,
+                dlpi_phdr: (*cur).phdr,
+                dlpi_phnum: (*cur).phnum as u16,
+                dlpi_adds: 0,
+                dlpi_subs: 0,
+                dlpi_tls_modid: 0,
+                dlpi_tls_data: core::ptr::null_mut(),
+            };
+            let r = f(&mut info, core::mem::size_of::<DlPhdrInfo>(), data);
+            if r != 0 {
+                return r;
+            }
+            cur = (*cur).next;
+        }
+        0
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dladdr_is_a_stub() {
+        let _guard = lock();
+        unsafe {
+            let mut info: DlInfo = core::mem::zeroed();
+            assert_eq!(dladdr(core::ptr::null(), &mut info), 0);
+        }
+    }
+
+    #[test]
+    fn dlinfo_rejects_garbage() {
+        let _guard = lock();
+        unsafe {
+            let mut out: *mut c_void = core::ptr::null_mut();
+            assert_eq!(dlinfo(0x1234 as *mut c_void, RTLD_DI_LINKMAP, &mut out), -1);
+            // A live handle with a bogus request fails the same way.
+            let h = linkmap::head();
+            if !h.is_null() {
+                assert_eq!(dlinfo(h as *mut c_void, 999, &mut out), -1);
+            }
+        }
+    }
+
+    static ITER_SEEN: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+    unsafe extern "C" fn count_cb(
+        info: *mut DlPhdrInfo,
+        _size: usize,
+        _data: *mut c_void,
+    ) -> c_int {
+        unsafe {
+            if !info.is_null() && !(*info).dlpi_name.is_null() {
+                ITER_SEEN.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+            }
+            0
+        }
+    }
+
+    unsafe extern "C" fn stop_cb(
+        _info: *mut DlPhdrInfo,
+        _size: usize,
+        _data: *mut c_void,
+    ) -> c_int {
+        7
+    }
+
+    #[test]
+    fn iterate_walks_and_stops() {
+        let _guard = lock();
+        unsafe {
+            ITER_SEEN.store(0, core::sync::atomic::Ordering::SeqCst);
+            // Null callback is a documented no-op.
+            assert_eq!(dl_iterate_phdr(None, core::ptr::null_mut()), 0);
+            let r = dl_iterate_phdr(Some(count_cb), core::ptr::null_mut());
+            assert_eq!(r, 0);
+            // Nonzero callback return stops the walk with that value
+            // (vacuous when the namespace is empty — still exact).
+            let n = ITER_SEEN.load(core::sync::atomic::Ordering::SeqCst);
+            if n > 0 {
+                assert_eq!(dl_iterate_phdr(Some(stop_cb), core::ptr::null_mut()), 7);
+            }
+        }
+    }
+
     use super::*;
     use crate::ldso::testlock::lock;
 

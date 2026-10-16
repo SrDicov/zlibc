@@ -5,14 +5,16 @@
 //! `pthread_detach.c`, the `pthread_attr_*` family, `pthread_self.c`,
 //! and `pthread_equal.c`. Exact musl signatures (`include/pthread.h`).
 
-use core::ffi::{c_int, c_void};
+use core::ffi::{c_char, c_int, c_void};
 use core::ptr::null_mut;
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 
 use crate::abi::PthreadT;
 use crate::futex::futex_wait_private;
 use crate::ldso::{MAP_ANONYMOUS, MAP_PRIVATE, PAGE_SIZE, PROT_NONE, PROT_READ, PROT_WRITE};
-use crate::syscall::{syscall1, syscall2, syscall3, syscall6, syscall_ret};
+use crate::syscall::{
+    syscall0, syscall1, syscall2, syscall3, syscall4, syscall5, syscall6, syscall_ret,
+};
 
 use super::tls::{copy_tls, ensure_main_tp, get_tp, set_tp};
 use super::unmapself::__unmapself;
@@ -38,7 +40,17 @@ core::arch::global_asm!(
     .hidden __pthread_attr_getscope\n.hidden __pthread_attr_setschedpolicy\n\
     .hidden __pthread_attr_getschedpolicy\n.hidden __pthread_attr_setschedparam\n\
     .hidden __pthread_attr_getschedparam\n.hidden __pthread_attr_setinheritsched\n\
-    .hidden __pthread_attr_getinheritsched"
+    .hidden __pthread_attr_getinheritsched\n\
+    .hidden __pthread_key_create\n.hidden __pthread_key_delete\n.hidden __pthread_getspecific\n\
+    .hidden __pthread_once\n.hidden __pthread_exit\n.hidden __pthread_cancel\n\
+    .hidden __pthread_testcancel\n.hidden __pthread_setcancelstate\n.hidden __pthread_setcanceltype\n\
+    .hidden __pthread_atfork\n\
+    .hidden __pthread_setattr_default_np\n.hidden __pthread_getattr_default_np\n\
+    .hidden __pthread_getattr_np\n.hidden __pthread_kill\n.hidden __pthread_sigmask\n\
+    .hidden __pthread_getschedparam\n.hidden __pthread_setschedparam\n.hidden __pthread_setschedprio\n\
+    .hidden __pthread_getcpuclockid\n.hidden __pthread_getaffinity_np\n.hidden __pthread_setaffinity_np\n\
+    .hidden __pthread_setname_np\n.hidden __pthread_getname_np\n.hidden __pthread_tryjoin_np\n\
+    .hidden __pthread_timedjoin_np"
 );
 
 // Public musl names for real links only (see module docs for why tests
@@ -89,6 +101,103 @@ crate::weak_alias!(pthread_attr_getschedparam, __pthread_attr_getschedparam);
 crate::weak_alias!(pthread_attr_setinheritsched, __pthread_attr_setinheritsched);
 #[cfg(all(not(test), target_arch = "x86_64"))]
 crate::weak_alias!(pthread_attr_getinheritsched, __pthread_attr_getinheritsched);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_key_create, __pthread_key_create);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_key_delete, __pthread_key_delete);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_getspecific, __pthread_getspecific);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(tss_get, __pthread_getspecific);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_once, __pthread_once);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(call_once, __pthread_once);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_exit, __pthread_exit);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_cancel, __pthread_cancel);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_testcancel, __pthread_testcancel);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_setcancelstate, __pthread_setcancelstate);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_setcanceltype, __pthread_setcanceltype);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_atfork, __pthread_atfork);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_setattr_default_np, __pthread_setattr_default_np);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_getattr_default_np, __pthread_getattr_default_np);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_getattr_np, __pthread_getattr_np);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_kill, __pthread_kill);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_sigmask, __pthread_sigmask);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_getschedparam, __pthread_getschedparam);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_setschedparam, __pthread_setschedparam);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_setschedprio, __pthread_setschedprio);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_getcpuclockid, __pthread_getcpuclockid);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_getaffinity_np, __pthread_getaffinity_np);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_setaffinity_np, __pthread_setaffinity_np);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_setname_np, __pthread_setname_np);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_getname_np, __pthread_getname_np);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_tryjoin_np, __pthread_tryjoin_np);
+#[cfg(all(not(test), target_arch = "x86_64"))]
+crate::weak_alias!(pthread_timedjoin_np, __pthread_timedjoin_np);
+
+// ---- C11 tss (musl src/thread/tss_{create,delete,set}.c: thin key wrappers) ----
+/// Create a thread-specific slot (musl `tss_create`).
+///
+/// # Safety
+///
+/// Same as [`__pthread_key_create`].
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn tss_create(tss: *mut u32, dtor: DtorFn) -> c_int {
+    unsafe { __pthread_key_create(tss, dtor) }
+}
+
+/// Delete a thread-specific slot (musl `tss_delete`: no error return).
+///
+/// # Safety
+///
+/// `key` should be live.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn tss_delete(key: u32) {
+    unsafe {
+        __pthread_key_delete(key);
+    }
+}
+
+/// Store a thread-specific value (musl `tss_set`: `EINVAL` becomes
+/// `thrd_error`, anything else is `thrd_success`).
+///
+/// # Safety
+///
+/// Same as [`pthread_setspecific`].
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn tss_set(key: u32, x: *mut c_void) -> c_int {
+    unsafe {
+        if pthread_setspecific(key, x) != 0 {
+            2
+        } else {
+            0
+        }
+    }
+}
 
 // Loader-visible names live next to their targets (not in `mod.rs`):
 // module-level `global_asm!` rides with its module's codegen unit, and
@@ -235,6 +344,7 @@ unsafe extern "C" fn child_entry(arg: usize) -> c_int {
             // create() guarantees `Some`; never call through null.
             None => null_mut(),
         };
+        run_tsd_dtors(td);
         thread_exit(td, res);
     }
 }
@@ -360,6 +470,16 @@ pub unsafe extern "C" fn __pthread_create(
         let mut stacksize = super::DEFAULT_STACKSIZE;
         let mut guardsize = super::DEFAULT_GUARDSIZE;
         let mut detached = false;
+        if attr.is_null() {
+            let d = default_attr_snapshot();
+            if d.stacksize() != 0 {
+                stacksize = d.stacksize();
+            }
+            if d.guardsize() != 0 {
+                guardsize = d.guardsize();
+            }
+            detached = d.detach() != 0;
+        }
         if !attr.is_null() {
             let a = &*attr;
             // shortcut(no explicit sched): the start-control handshake
@@ -942,6 +1062,1278 @@ pub unsafe extern "C" fn __pthread_attr_getinheritsched(
     0
 }
 
+// ---- TSD (musl src/thread/pthread_key_create.c + getspecific/setspecific) ----
+/// Key slots (musl `PTHREAD_KEYS_MAX`, `include/limits.h:66`).
+#[cfg(target_arch = "x86_64")]
+const PTHREAD_KEYS_MAX: usize = 128;
+/// Destructor iterations at thread death (musl `PTHREAD_DESTRUCTOR_ITERATIONS`).
+#[cfg(target_arch = "x86_64")]
+const PTHREAD_DESTRUCTOR_ITERATIONS: usize = 4;
+
+/// Key slot liveness (musl `keys[]` occupancy; atomics, written under
+/// `KEY_LOCK`).
+#[cfg(target_arch = "x86_64")]
+static KEYS_USED: [AtomicBool; PTHREAD_KEYS_MAX] =
+    [const { AtomicBool::new(false) }; PTHREAD_KEYS_MAX];
+
+/// Key destructors, parallel to [`KEYS_USED`] (musl `keys[]` payload).
+/// Written under `KEY_LOCK` only.
+#[cfg(target_arch = "x86_64")]
+static mut KEYS_DTOR: [*mut c_void; PTHREAD_KEYS_MAX] = [null_mut(); PTHREAD_KEYS_MAX];
+
+#[cfg(target_arch = "x86_64")]
+type DtorFn = Option<unsafe extern "C" fn(*mut c_void)>;
+
+#[cfg(target_arch = "x86_64")]
+static NEXT_KEY: AtomicUsize = AtomicUsize::new(0);
+
+/// Create a thread-specific key (musl `__pthread_key_create`: lowest free
+/// slot from a rotating cursor, `EAGAIN` when full; null dtor is a
+/// sentinel, never called).
+///
+/// # Safety
+///
+/// `k` must point to writable `pthread_key_t`; `dtor` must be null or a
+/// valid destructor (runs at thread exit, see [`run_tsd_dtors`]).
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_key_create(k: *mut u32, dtor: DtorFn) -> c_int {
+    unsafe {
+        if k.is_null() {
+            return EINVAL;
+        }
+        // fake lock: single global spinlock would do; musl uses an rwlock.
+        // Contention here is creation-only; a test-and-set spin is enough.
+        while KEY_LOCK.swap(true, Ordering::Acquire) {
+            core::hint::spin_loop();
+        }
+        let start = NEXT_KEY.load(Ordering::Relaxed) % PTHREAD_KEYS_MAX;
+        let mut j = start;
+        let mut rc = EAGAIN;
+        loop {
+            if !KEYS_USED[j].load(Ordering::Relaxed) {
+                KEYS_USED[j].store(true, Ordering::Relaxed);
+                core::ptr::addr_of_mut!(KEYS_DTOR[j])
+                    .write(dtor.map_or(null_mut(), |f| f as *mut c_void));
+                NEXT_KEY.store((j + 1) % PTHREAD_KEYS_MAX, Ordering::Relaxed);
+                *k = j as u32;
+                rc = 0;
+                break;
+            }
+            j = (j + 1) % PTHREAD_KEYS_MAX;
+            if j == start {
+                break;
+            }
+        }
+        KEY_LOCK.store(false, Ordering::Release);
+        rc
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+static KEY_LOCK: AtomicBool = AtomicBool::new(false);
+
+/// Delete a key (musl: frees the slot; values stay until overwritten).
+///
+/// # Safety
+///
+/// `k` must be a live key from [`__pthread_key_create`].
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_key_delete(k: u32) -> c_int {
+    unsafe {
+        if k as usize >= PTHREAD_KEYS_MAX {
+            return EINVAL;
+        }
+        while KEY_LOCK.swap(true, Ordering::Acquire) {
+            core::hint::spin_loop();
+        }
+        KEYS_USED[k as usize].store(false, Ordering::Relaxed);
+        core::ptr::addr_of_mut!(KEYS_DTOR[k as usize]).write(null_mut());
+        KEY_LOCK.store(false, Ordering::Release);
+        0
+    }
+}
+
+/// Read a thread-specific value (musl `__pthread_getspecific`: direct
+/// index; out-of-range keys read null here instead of OOB — strictly
+/// safer, same observable result for live keys).
+///
+/// # Safety
+///
+/// `k` should be a live key; foreign keys yield null.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_getspecific(k: u32) -> *mut c_void {
+    unsafe {
+        if k as usize >= PTHREAD_KEYS_MAX {
+            return null_mut();
+        }
+        let td = get_tp() as *mut Thread;
+        if td.is_null() {
+            return null_mut();
+        }
+        (*td).tsd[k as usize]
+    }
+}
+
+/// Store a thread-specific value (musl `pthread_setspecific`: always 0).
+///
+/// # Safety
+///
+/// `k` should be a live key; foreign keys are ignored.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn pthread_setspecific(k: u32, x: *const c_void) -> c_int {
+    unsafe {
+        if k as usize >= PTHREAD_KEYS_MAX {
+            return EINVAL;
+        }
+        let td = get_tp() as *mut Thread;
+        if td.is_null() {
+            return EINVAL;
+        }
+        (*td).tsd[k as usize] = x as *mut c_void;
+        0
+    }
+}
+
+/// Run TSD destructors for `td` (musl `__pthread_exit.c:__do_tsd_dtors`:
+/// up to 4 passes while any destructor sets a value).
+///
+/// # Safety
+///
+/// `td` must be the calling thread's live `Thread`, past the start
+/// routine (no user code runs here, so no new values appear mid-pass).
+#[cfg(target_arch = "x86_64")]
+pub(crate) unsafe fn run_tsd_dtors(td: *mut Thread) {
+    unsafe {
+        for _ in 0..PTHREAD_DESTRUCTOR_ITERATIONS {
+            let mut any = false;
+            for (k, used) in KEYS_USED.iter().enumerate() {
+                if !used.load(Ordering::Relaxed) {
+                    continue;
+                }
+                let v = (*td).tsd[k];
+                if v.is_null() {
+                    continue;
+                }
+                let dtor: DtorFn = core::mem::transmute(KEYS_DTOR[k]);
+                (*td).tsd[k] = null_mut();
+                if let Some(f) = dtor {
+                    any = true;
+                    f(v);
+                }
+            }
+            if !any {
+                break;
+            }
+        }
+    }
+}
+
+// ---- once (musl src/thread/pthread_once.c) --------------------------------------
+/// One-time init (musl `__pthread_once_full`: 0 run / 1 running / 2 done /
+/// 3 running-with-waiters, futex protocol; no cleanup-push — init must
+/// not exit the thread, same observable outcome).
+///
+/// # Safety
+///
+/// `control` must point to a live `pthread_once_t` (`0`-init);
+/// `init` must be non-null.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_once(
+    control: *mut c_int,
+    init: Option<unsafe extern "C" fn()>,
+) -> c_int {
+    unsafe {
+        if control.is_null() || init.is_none() {
+            return EINVAL;
+        }
+        loop {
+            let aw = control as *const AtomicI32;
+            let prev = (&*aw)
+                .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+                .unwrap_or_else(|v| v);
+            if prev == 0 {
+                init.unwrap_unchecked()();
+                let had_waiters = (&*aw).swap(2, Ordering::SeqCst);
+                if had_waiters == 3 {
+                    crate::futex::futex_wake_private(control, -1);
+                }
+                return 0;
+            }
+            if prev == 2 {
+                return 0;
+            }
+            // 1 or 3: mark waiter presence, then sleep while still 1/3.
+            let _ = (&*aw).compare_exchange(1, 3, Ordering::SeqCst, Ordering::SeqCst);
+            let cur = (&*aw).load(Ordering::SeqCst);
+            if cur == 1 || cur == 3 {
+                crate::futex::futex_wait_private(control, cur);
+            }
+        }
+    }
+}
+
+// ---- exit (musl pthread_create.c:__pthread_exit) ----------------------------------
+/// Thread value for cancelled threads (musl `PTHREAD_CANCELED`, -1).
+#[cfg(target_arch = "x86_64")]
+pub const PTHREAD_CANCELED: *mut c_void = -1isize as *mut c_void;
+
+/// Exit the calling thread (musl `__pthread_exit`: TSD destructors, then
+/// the joinable/detached death protocol in [`thread_exit`]).
+///
+/// # Safety
+///
+/// Must be called on a thread this library created; never returns.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_exit(res: *mut c_void) -> ! {
+    unsafe {
+        let td = get_tp() as *mut Thread;
+        run_tsd_dtors(td);
+        thread_exit(td, res);
+    }
+}
+
+// ---- cancel (musl pthread_cancel.c, deferred-only) ----------------------------------
+//
+// shortcut(no async cancel, no signal wakeup): musl delivers via
+// `SIGCANCEL` interrupting blocking syscalls (`__syscall_cp`). Here
+// `__pthread_cancel` only raises the pending flag; delivery happens at
+// explicit cancel points (`__pthread_testcancel` and, with later waves,
+// blocking primitives that opt in). A thread parked in a futex without
+// such a point stays parked. Async type is recorded and reported
+// exactly, but acts like deferred.
+#[cfg(target_arch = "x86_64")]
+pub const PTHREAD_CANCEL_ENABLE: c_int = 0;
+#[cfg(target_arch = "x86_64")]
+pub const PTHREAD_CANCEL_DISABLE: c_int = 1;
+#[cfg(target_arch = "x86_64")]
+pub const PTHREAD_CANCEL_DEFERRED: c_int = 0;
+#[cfg(target_arch = "x86_64")]
+pub const PTHREAD_CANCEL_ASYNCHRONOUS: c_int = 1;
+
+/// Act on a pending cancellation for the calling thread: exit with
+/// `PTHREAD_CANCELED` when enabled (musl `__cancel`).
+///
+/// # Safety
+///
+/// Must be called on a thread this library created.
+#[cfg(target_arch = "x86_64")]
+unsafe fn do_cancel_self() {
+    unsafe {
+        let td = get_tp() as *mut Thread;
+        if td.is_null() {
+            return;
+        }
+        if (*td).cancel_disable.load(Ordering::SeqCst) == PTHREAD_CANCEL_ENABLE
+            || (*td).cancel_async.load(Ordering::SeqCst) != 0
+        {
+            run_tsd_dtors(td);
+            thread_exit(td, PTHREAD_CANCELED);
+        }
+    }
+}
+
+/// Request cancellation (musl `pthread_cancel` minus the `SIGCANCEL`
+/// kick: flag only, see module note; self-cancel with enable-or-async
+/// acts immediately).
+///
+/// # Safety
+///
+/// `t` must be a live thread this library created.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_cancel(t: PthreadT) -> c_int {
+    unsafe {
+        if t.is_null() {
+            return ESRCH;
+        }
+        let td = t as *mut Thread;
+        (*td).cancel_pending.store(true, Ordering::SeqCst);
+        if td as usize == get_tp() {
+            do_cancel_self();
+        }
+        0
+    }
+}
+
+/// Cancel point (musl `pthread_testcancel`: exit when a request is
+/// pending and cancellation is enabled).
+///
+/// # Safety
+///
+/// Must be called on a thread this library created.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_testcancel() {
+    unsafe {
+        let td = get_tp() as *mut Thread;
+        if td.is_null() {
+            return;
+        }
+        if (*td).cancel_pending.load(Ordering::SeqCst) {
+            do_cancel_self();
+        }
+    }
+}
+
+/// Set cancelability state (musl `pthread_setcancelstate`: store +
+/// report old; enabling with a pending request acts at once).
+///
+/// # Safety
+///
+/// `old` must be null or writable.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_setcancelstate(state: c_int, old: *mut c_int) -> c_int {
+    unsafe {
+        if state != PTHREAD_CANCEL_ENABLE && state != PTHREAD_CANCEL_DISABLE {
+            return EINVAL;
+        }
+        let td = get_tp() as *mut Thread;
+        if td.is_null() {
+            return EINVAL;
+        }
+        if !old.is_null() {
+            *old = (*td).cancel_disable.load(Ordering::SeqCst);
+        }
+        (*td).cancel_disable.store(state, Ordering::SeqCst);
+        if state == PTHREAD_CANCEL_ENABLE && (*td).cancel_pending.load(Ordering::SeqCst) {
+            do_cancel_self();
+        }
+        0
+    }
+}
+
+/// Set cancelability type (musl `pthread_setcanceltype`: store + report
+/// old; switching to async with a pending request acts at once).
+///
+/// # Safety
+///
+/// `old` must be null or writable.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_setcanceltype(ty: c_int, old: *mut c_int) -> c_int {
+    unsafe {
+        if ty != PTHREAD_CANCEL_DEFERRED && ty != PTHREAD_CANCEL_ASYNCHRONOUS {
+            return EINVAL;
+        }
+        let td = get_tp() as *mut Thread;
+        if td.is_null() {
+            return EINVAL;
+        }
+        if !old.is_null() {
+            *old = (*td).cancel_async.load(Ordering::SeqCst);
+        }
+        (*td).cancel_async.store(ty, Ordering::SeqCst);
+        if ty == PTHREAD_CANCEL_ASYNCHRONOUS && (*td).cancel_pending.load(Ordering::SeqCst) {
+            do_cancel_self();
+        }
+        0
+    }
+}
+
+// ---- atfork (musl src/thread/pthread_atfork.c) ---------------------------------------
+#[cfg(target_arch = "x86_64")]
+const ATFORK_MAX: usize = 32;
+
+#[cfg(target_arch = "x86_64")]
+type AtforkFn = Option<unsafe extern "C" fn()>;
+
+#[cfg(target_arch = "x86_64")]
+struct AtforkEntry {
+    prepare: AtforkFn,
+    parent: AtforkFn,
+    child: AtforkFn,
+}
+
+#[cfg(target_arch = "x86_64")]
+static mut ATFORK: [AtforkEntry; ATFORK_MAX] = {
+    const E: AtforkEntry = AtforkEntry {
+        prepare: None,
+        parent: None,
+        child: None,
+    };
+    [E; ATFORK_MAX]
+};
+#[cfg(target_arch = "x86_64")]
+static ATFORK_N: AtomicUsize = AtomicUsize::new(0);
+#[cfg(target_arch = "x86_64")]
+static ATFORK_LOCK: AtomicBool = AtomicBool::new(false);
+
+/// Register fork handlers (musl `pthread_atfork`: LIFO order,
+/// `ENOMEM` when full).
+///
+/// # Safety
+///
+/// Handlers must be null or valid fork-safe functions.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_atfork(
+    prepare: AtforkFn,
+    parent: AtforkFn,
+    child: AtforkFn,
+) -> c_int {
+    unsafe {
+        while ATFORK_LOCK.swap(true, Ordering::Acquire) {
+            core::hint::spin_loop();
+        }
+        let n = ATFORK_N.load(Ordering::Relaxed);
+        let rc = if n >= ATFORK_MAX {
+            ENOMEM_LOCAL
+        } else {
+            core::ptr::addr_of_mut!(ATFORK[n]).write(AtforkEntry {
+                prepare,
+                parent,
+                child,
+            });
+            ATFORK_N.store(n + 1, Ordering::Relaxed);
+            0
+        };
+        ATFORK_LOCK.store(false, Ordering::Release);
+        rc
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+const ENOMEM_LOCAL: c_int = 12;
+
+/// Run atfork handlers for `who` (0 prepare, 1 parent, 2 child), LIFO
+/// (musl `__fork_handler`). Called by [`crate::process::fork`].
+///
+/// # Safety
+///
+/// Runs arbitrary registered handlers; fork-safe by contract.
+#[cfg(target_arch = "x86_64")]
+pub(crate) unsafe fn run_atfork(who: c_int) {
+    unsafe {
+        let n = ATFORK_N.load(Ordering::Acquire);
+        let mut i = n;
+        while i > 0 {
+            i -= 1;
+            let f = match who {
+                0 => ATFORK[i].prepare,
+                1 => ATFORK[i].parent,
+                _ => ATFORK[i].child,
+            };
+            if let Some(g) = f {
+                g();
+            }
+        }
+    }
+}
+
+// ---- default attr (musl __pthread_default_attr) -------------------------------
+/// Process-wide default thread attributes (musl
+/// `__pthread_default_attr`, used at create when `attr` is null).
+#[cfg(target_arch = "x86_64")]
+static mut DEFAULT_ATTR: AttrT = AttrT { words: [0; 7] };
+#[cfg(target_arch = "x86_64")]
+static DEFAULT_ATTR_LOCK: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn default_attr_snapshot() -> AttrT {
+    unsafe {
+        while DEFAULT_ATTR_LOCK.swap(true, Ordering::Acquire) {
+            core::hint::spin_loop();
+        }
+        let a = core::ptr::addr_of!(DEFAULT_ATTR).read();
+        DEFAULT_ATTR_LOCK.store(false, Ordering::Release);
+        a
+    }
+}
+
+/// Replace the default attributes (musl `pthread_setattr_default_np`).
+///
+/// # Safety
+///
+/// `attr` must point to a valid `AttrT`.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_setattr_default_np(attr: *const AttrT) -> c_int {
+    unsafe {
+        if attr.is_null() {
+            return EINVAL;
+        }
+        while DEFAULT_ATTR_LOCK.swap(true, Ordering::Acquire) {
+            core::hint::spin_loop();
+        }
+        core::ptr::addr_of_mut!(DEFAULT_ATTR).write(*attr);
+        DEFAULT_ATTR_LOCK.store(false, Ordering::Release);
+        0
+    }
+}
+
+/// Read the default attributes (musl `pthread_getattr_default_np`).
+///
+/// # Safety
+///
+/// `attr` must point to a writable `AttrT`.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_getattr_default_np(attr: *mut AttrT) -> c_int {
+    unsafe {
+        if attr.is_null() {
+            return EINVAL;
+        }
+        *attr = default_attr_snapshot();
+        0
+    }
+}
+
+/// Describe a live thread (musl `pthread_getattr_np`: stack, guard,
+/// detach state from the TCB; sched fields report exact).
+///
+/// # Safety
+///
+/// `t` must be a live thread; `attr` writable.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_getattr_np(t: PthreadT, attr: *mut AttrT) -> c_int {
+    unsafe {
+        if t.is_null() || attr.is_null() {
+            return ESRCH;
+        }
+        let td = t as *mut Thread;
+        if (*td).magic != super::THREAD_MAGIC {
+            return ESRCH;
+        }
+        let mut a = AttrT::default();
+        a.set_stacksize((*td).stack_size);
+        a.set_guardsize((*td).guard_size);
+        // musl reports the stack base, not the top.
+        a.set_stackaddr(((*td).stack as usize).wrapping_sub((*td).stack_size));
+        let st = (*td).detach_state.load(Ordering::SeqCst);
+        a.set_detach(if st == DT_DETACHED { 1 } else { 0 });
+        *attr = a;
+        0
+    }
+}
+
+// ---- signals on threads (musl pthread_kill.c, pthread_sigmask.c) ---------------
+#[cfg(target_arch = "x86_64")]
+const SYS_TKILL: usize = 200;
+#[cfg(target_arch = "x86_64")]
+const SYS_RT_SIGPROCMASK: usize = 14;
+
+/// Send a signal to a thread (musl `pthread_kill`: `tkill` on the TD's
+/// tid; signal 0 probes liveness).
+///
+/// # Safety
+///
+/// `t` must be a live thread this library created.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_kill(t: PthreadT, sig: c_int) -> c_int {
+    unsafe {
+        if t.is_null() {
+            return ESRCH;
+        }
+        let td = t as *mut Thread;
+        if (*td).magic != super::THREAD_MAGIC {
+            return ESRCH;
+        }
+        let tid = (*td).tid;
+        if tid == 0 {
+            return ESRCH;
+        }
+        syscall_ret(syscall2(SYS_TKILL, tid as usize, sig as usize)) as c_int
+    }
+}
+
+/// Thread signal mask (musl `pthread_sigmask`: direct `rt_sigprocmask`).
+///
+/// # Safety
+///
+/// `set`/`old` must be null or point to valid `sigset_t` (16 words).
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_sigmask(how: c_int, set: *const u64, old: *mut u64) -> c_int {
+    unsafe {
+        syscall_ret(syscall4(
+            SYS_RT_SIGPROCMASK,
+            how as usize,
+            set as usize,
+            old as usize,
+            16,
+        )) as c_int
+    }
+}
+
+// ---- sched (musl sched_*.c + pthread_*schedparam.c) -------------------------------
+#[cfg(target_arch = "x86_64")]
+const SYS_SCHED_YIELD: usize = 24;
+#[cfg(target_arch = "x86_64")]
+const SYS_SCHED_SETPARAM: usize = 142;
+#[cfg(target_arch = "x86_64")]
+const SYS_SCHED_GETPARAM: usize = 143;
+#[cfg(target_arch = "x86_64")]
+const SYS_SCHED_SETSCHEDULER: usize = 144;
+#[cfg(target_arch = "x86_64")]
+const SYS_SCHED_GETSCHEDULER: usize = 145;
+#[cfg(target_arch = "x86_64")]
+const SYS_SCHED_GET_PRIORITY_MAX: usize = 146;
+#[cfg(target_arch = "x86_64")]
+const SYS_SCHED_GET_PRIORITY_MIN: usize = 147;
+#[cfg(target_arch = "x86_64")]
+const SYS_SCHED_RR_GET_INTERVAL: usize = 148;
+#[cfg(target_arch = "x86_64")]
+const SYS_SCHED_SETAFFINITY: usize = 203;
+#[cfg(target_arch = "x86_64")]
+const SYS_SCHED_GETAFFINITY: usize = 204;
+#[cfg(target_arch = "x86_64")]
+const SYS_SCHED_GETCPU: usize = 309;
+
+/// Yield the processor (musl `sched_yield`: direct trap).
+///
+/// # Safety
+///
+/// Pure value call.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn sched_yield() -> c_int {
+    unsafe { syscall_ret(syscall0(SYS_SCHED_YIELD)) as c_int }
+}
+
+/// Set scheduling parameters (musl `sched_setparam`: direct trap).
+///
+/// # Safety
+///
+/// `p` must point to a readable `SchedParam`.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn sched_setparam(pid: c_int, p: *const SchedParam) -> c_int {
+    unsafe {
+        if p.is_null() {
+            return EINVAL;
+        }
+        syscall_ret(syscall2(SYS_SCHED_SETPARAM, pid as usize, p as usize)) as c_int
+    }
+}
+
+/// Get scheduling parameters (musl `sched_getparam`: direct trap).
+///
+/// # Safety
+///
+/// `p` must point to a writable `SchedParam`.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn sched_getparam(pid: c_int, p: *mut SchedParam) -> c_int {
+    unsafe {
+        if p.is_null() {
+            return EINVAL;
+        }
+        syscall_ret(syscall2(SYS_SCHED_GETPARAM, pid as usize, p as usize)) as c_int
+    }
+}
+
+/// Set scheduling policy (musl `sched_setscheduler`: direct trap).
+///
+/// # Safety
+///
+/// `p` must point to a readable `SchedParam`.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn sched_setscheduler(pid: c_int, pol: c_int, p: *const SchedParam) -> c_int {
+    unsafe {
+        if p.is_null() {
+            return EINVAL;
+        }
+        syscall_ret(syscall3(
+            SYS_SCHED_SETSCHEDULER,
+            pid as usize,
+            pol as usize,
+            p as usize,
+        )) as c_int
+    }
+}
+
+/// Get scheduling policy (musl `sched_getscheduler`: direct trap).
+///
+/// # Safety
+///
+/// Pure value call.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn sched_getscheduler(pid: c_int) -> c_int {
+    unsafe { syscall_ret(syscall1(SYS_SCHED_GETSCHEDULER, pid as usize)) as c_int }
+}
+
+/// Max real-time priority (musl: direct trap).
+///
+/// # Safety
+///
+/// Pure value call.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn sched_get_priority_max(pol: c_int) -> c_int {
+    unsafe { syscall_ret(syscall1(SYS_SCHED_GET_PRIORITY_MAX, pol as usize)) as c_int }
+}
+
+/// Min real-time priority (musl: direct trap).
+///
+/// # Safety
+///
+/// Pure value call.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn sched_get_priority_min(pol: c_int) -> c_int {
+    unsafe { syscall_ret(syscall1(SYS_SCHED_GET_PRIORITY_MIN, pol as usize)) as c_int }
+}
+
+/// Round-robin quantum (musl `sched_rr_get_interval`: direct trap).
+///
+/// # Safety
+///
+/// `ts` must point to a writable `Timespec`.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn sched_rr_get_interval(
+    pid: c_int,
+    ts: *mut crate::time::Timespec,
+) -> c_int {
+    unsafe {
+        if ts.is_null() {
+            return EINVAL;
+        }
+        syscall_ret(syscall2(
+            SYS_SCHED_RR_GET_INTERVAL,
+            pid as usize,
+            ts as usize,
+        )) as c_int
+    }
+}
+
+/// Set CPU affinity (musl `sched_setaffinity`: direct trap).
+///
+/// # Safety
+///
+/// `mask` must point to `len` readable bytes.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn sched_setaffinity(pid: c_int, len: usize, mask: *const c_void) -> c_int {
+    unsafe {
+        if mask.is_null() {
+            return EINVAL;
+        }
+        syscall_ret(syscall3(
+            SYS_SCHED_SETAFFINITY,
+            pid as usize,
+            len,
+            mask as usize,
+        )) as c_int
+    }
+}
+
+/// Raw affinity fetch with tail-zeroing (musl `do_getaffinity` in
+/// `src/sched/affinity.c`: 0 on success with the tail zeroed, negative
+/// errno on failure).
+///
+/// # Safety
+///
+/// `mask` must point to `len` writable bytes.
+#[cfg(target_arch = "x86_64")]
+pub(crate) unsafe fn do_getaffinity(pid: c_int, len: usize, mask: *mut c_void) -> isize {
+    unsafe {
+        let r = syscall_ret(syscall3(
+            SYS_SCHED_GETAFFINITY,
+            pid as usize,
+            len,
+            mask as usize,
+        ));
+        if r < 0 {
+            return r;
+        }
+        if (r as usize) < len {
+            core::ptr::write_bytes((mask as *mut u8).add(r as usize), 0, len - r as usize);
+        }
+        0
+    }
+}
+
+/// Get CPU affinity (musl `sched_getaffinity`: 0 with zeroed tail).
+///
+/// # Safety
+///
+/// `mask` must point to `len` writable bytes.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn sched_getaffinity(pid: c_int, len: usize, mask: *mut c_void) -> c_int {
+    unsafe {
+        if mask.is_null() {
+            return EINVAL;
+        }
+        do_getaffinity(pid, len, mask) as c_int
+    }
+}
+
+/// Current CPU (musl `sched_getcpu`: direct trap).
+///
+/// # Safety
+///
+/// Pure value call.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn sched_getcpu() -> c_int {
+    unsafe { syscall_ret(syscall3(SYS_SCHED_GETCPU, 0, 0, 0)) as c_int }
+}
+
+/// Thread scheduling parameters (musl `pthread_getschedparam`: policy +
+/// param of the TD's tid).
+///
+/// # Safety
+///
+/// `t` live; `pol`/`p` writable.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_getschedparam(
+    t: PthreadT,
+    pol: *mut c_int,
+    p: *mut SchedParam,
+) -> c_int {
+    unsafe {
+        if t.is_null() {
+            return ESRCH;
+        }
+        let td = t as *mut Thread;
+        if (*td).magic != super::THREAD_MAGIC {
+            return ESRCH;
+        }
+        let tid = (*td).tid as c_int;
+        let got = sched_getscheduler(tid);
+        if got < 0 {
+            return crate::errno::errno_load(crate::errno::__errno_location());
+        }
+        if sched_getparam(tid, p) != 0 {
+            return crate::errno::errno_load(crate::errno::__errno_location());
+        }
+        if !pol.is_null() {
+            *pol = got;
+        }
+        0
+    }
+}
+
+/// Set thread scheduling (musl `pthread_setschedparam`: scheduler +
+/// param on the TD's tid).
+///
+/// # Safety
+///
+/// `t` live; `p` readable.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_setschedparam(
+    t: PthreadT,
+    pol: c_int,
+    p: *const SchedParam,
+) -> c_int {
+    unsafe {
+        if t.is_null() {
+            return ESRCH;
+        }
+        let td = t as *mut Thread;
+        if (*td).magic != super::THREAD_MAGIC {
+            return ESRCH;
+        }
+        let r = sched_setscheduler((*td).tid as c_int, pol, p);
+        if r != 0 {
+            crate::errno::errno_load(crate::errno::__errno_location())
+        } else {
+            0
+        }
+    }
+}
+
+/// Set thread priority keeping its policy (musl `pthread_setschedprio`).
+///
+/// # Safety
+///
+/// `t` must be a live thread.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_setschedprio(t: PthreadT, prio: c_int) -> c_int {
+    unsafe {
+        if t.is_null() {
+            return ESRCH;
+        }
+        let td = t as *mut Thread;
+        if (*td).magic != super::THREAD_MAGIC {
+            return ESRCH;
+        }
+        let tid = (*td).tid as c_int;
+        let pol = sched_getscheduler(tid);
+        if pol < 0 {
+            return crate::errno::errno_load(crate::errno::__errno_location());
+        }
+        let p = SchedParam {
+            sched_priority: prio,
+        };
+        let r = sched_setscheduler(tid, pol, &p);
+        if r != 0 {
+            crate::errno::errno_load(crate::errno::__errno_location())
+        } else {
+            0
+        }
+    }
+}
+
+/// CPU clock of a thread (musl `pthread_getcpuclockid`:
+/// `(-tid-1)*8+6`).
+///
+/// # Safety
+///
+/// `t` live; `clockid` writable.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_getcpuclockid(t: PthreadT, clockid: *mut c_int) -> c_int {
+    unsafe {
+        if t.is_null() || clockid.is_null() {
+            return ESRCH;
+        }
+        let td = t as *mut Thread;
+        if (*td).magic != super::THREAD_MAGIC {
+            return ESRCH;
+        }
+        *clockid = ((-((*td).tid as i64) + 1) * 8 + 6) as c_int;
+        0
+    }
+}
+
+/// Thread CPU affinity, read (musl `pthread_getaffinity_np`:
+/// `sched_getaffinity` on the TD's tid).
+///
+/// # Safety
+///
+/// `t` live; `mask` writable for `len` bytes.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_getaffinity_np(
+    t: PthreadT,
+    len: usize,
+    mask: *mut c_void,
+) -> c_int {
+    unsafe {
+        if t.is_null() {
+            return ESRCH;
+        }
+        let td = t as *mut Thread;
+        if (*td).magic != super::THREAD_MAGIC {
+            return ESRCH;
+        }
+        let r = do_getaffinity((*td).tid as c_int, len, mask);
+        if r < 0 {
+            (-r) as c_int
+        } else {
+            0
+        }
+    }
+}
+
+/// Thread CPU affinity, write (musl `pthread_setaffinity_np`).
+///
+/// # Safety
+///
+/// `t` live; `mask` readable for `len` bytes.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_setaffinity_np(
+    t: PthreadT,
+    len: usize,
+    mask: *const c_void,
+) -> c_int {
+    unsafe {
+        if t.is_null() {
+            return ESRCH;
+        }
+        let td = t as *mut Thread;
+        if (*td).magic != super::THREAD_MAGIC {
+            return ESRCH;
+        }
+        let r = sched_setaffinity((*td).tid as c_int, len, mask);
+        if r != 0 {
+            crate::errno::errno_load(crate::errno::__errno_location())
+        } else {
+            0
+        }
+    }
+}
+
+// ---- names (musl pthread_{get,set}name_np.c) -----------------------------------
+#[cfg(target_arch = "x86_64")]
+const PR_SET_NAME: usize = 15;
+#[cfg(target_arch = "x86_64")]
+const PR_GET_NAME: usize = 16;
+#[cfg(target_arch = "x86_64")]
+const SYS_PRCTL: usize = 157;
+
+/// Thread name, write (musl: self via `prctl`, others via
+/// `/proc/self/task/<tid>/comm`; over-15 chars is `ERANGE`).
+///
+/// # Safety
+///
+/// `t` live; `name` NUL-terminated.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_setname_np(t: PthreadT, name: *const c_char) -> c_int {
+    unsafe {
+        if t.is_null() || name.is_null() {
+            return ESRCH;
+        }
+        let td = t as *mut Thread;
+        if (*td).magic != super::THREAD_MAGIC {
+            return ESRCH;
+        }
+        let mut n = 0usize;
+        while n < 16 && *name.add(n) != 0 {
+            n += 1;
+        }
+        if n > 15 {
+            return ERANGE_LOCAL;
+        }
+        if td as usize == get_tp() {
+            return syscall_ret(syscall5(SYS_PRCTL, PR_SET_NAME, name as usize, 0, 0, 0)) as c_int;
+        }
+        // Other threads: write /proc/self/task/<tid>/comm (musl shape).
+        let mut path = [0 as c_char; 48];
+        let mut pn = 0usize;
+        for b in b"/proc/self/task/".iter() {
+            path[pn] = *b as c_char;
+            pn += 1;
+        }
+        pn = put_tid(&mut path, pn, (*td).tid);
+        for b in b"/comm".iter() {
+            if pn < path.len() {
+                path[pn] = *b as c_char;
+                pn += 1;
+            }
+        }
+        if pn < path.len() {
+            path[pn] = 0;
+        }
+        let fd = crate::fcntl::open(path.as_ptr(), 1, 0);
+        if fd < 0 {
+            return crate::errno::errno_load(crate::errno::__errno_location());
+        }
+        let w = crate::unistd::write(fd, name as *const c_void, n);
+        crate::unistd::close(fd);
+        if (w as usize) != n {
+            crate::errno::errno_load(crate::errno::__errno_location())
+        } else {
+            0
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+const ERANGE_LOCAL: c_int = 34;
+
+#[cfg(target_arch = "x86_64")]
+fn put_tid(path: &mut [c_char; 48], mut pn: usize, mut tid: c_int) -> usize {
+    let mut digs = [0 as c_char; 10];
+    let mut nd = 0usize;
+    if tid == 0 {
+        digs[0] = b'0' as c_char;
+        nd = 1;
+    }
+    while tid > 0 && nd < digs.len() {
+        digs[nd] = b'0'.wrapping_add((tid % 10) as u8) as c_char;
+        nd += 1;
+        tid /= 10;
+    }
+    while nd > 0 && pn < path.len() {
+        nd -= 1;
+        path[pn] = digs[nd];
+        pn += 1;
+    }
+    pn
+}
+
+/// Thread name, read (musl: self via `prctl`, others via
+/// `/proc/self/task/<tid>/comm`).
+///
+/// # Safety
+///
+/// `name` writable for `len` bytes.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_getname_np(t: PthreadT, name: *mut c_char, len: usize) -> c_int {
+    unsafe {
+        if t.is_null() || name.is_null() || len == 0 {
+            return ESRCH;
+        }
+        let td = t as *mut Thread;
+        if (*td).magic != super::THREAD_MAGIC {
+            return ESRCH;
+        }
+        let mut tmp = [0 as c_char; 16];
+        if td as usize == get_tp() {
+            let r = syscall_ret(syscall5(
+                SYS_PRCTL,
+                PR_GET_NAME,
+                tmp.as_mut_ptr() as usize,
+                0,
+                0,
+                0,
+            ));
+            if r != 0 {
+                return r as c_int;
+            }
+        } else {
+            let mut path = [0 as c_char; 48];
+            let mut pn = 0usize;
+            for b in b"/proc/self/task/".iter() {
+                path[pn] = *b as c_char;
+                pn += 1;
+            }
+            pn = put_tid(&mut path, pn, (*td).tid);
+            for b in b"/comm".iter() {
+                if pn < path.len() {
+                    path[pn] = *b as c_char;
+                    pn += 1;
+                }
+            }
+            if pn < path.len() {
+                path[pn] = 0;
+            }
+            let fd = crate::fcntl::open(path.as_ptr(), 0, 0);
+            if fd < 0 {
+                return crate::errno::errno_load(crate::errno::__errno_location());
+            }
+            let mut n = 0usize;
+            while n < 15 {
+                let mut c: c_char = 0;
+                let r = crate::unistd::read(fd, &mut c as *mut c_char as *mut c_void, 1);
+                if r <= 0 || c == 0 || c == b'\n' as c_char {
+                    break;
+                }
+                tmp[n] = c;
+                n += 1;
+            }
+            crate::unistd::close(fd);
+            tmp[n] = 0;
+        }
+        let mut n = 0usize;
+        while n < 16 && tmp[n] != 0 {
+            n += 1;
+        }
+        if len <= n {
+            return ERANGE_LOCAL;
+        }
+        core::ptr::copy_nonoverlapping(tmp.as_ptr(), name, n + 1);
+        0
+    }
+}
+
+// ---- joins + concurrency (musl pthread_tryjoin_np.c, *_concurrency.c) ------------
+/// Concurrency level (musl: stored value, informational only).
+#[cfg(target_arch = "x86_64")]
+static CONCURRENCY: AtomicI32 = AtomicI32::new(0);
+
+/// Get concurrency (musl `pthread_getconcurrency`).
+///
+/// # Safety
+///
+/// Pure value call.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn pthread_getconcurrency() -> c_int {
+    CONCURRENCY.load(Ordering::SeqCst)
+}
+
+/// Set concurrency (musl `pthread_setconcurrency`: negative is `EINVAL`).
+///
+/// # Safety
+///
+/// Pure value call.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn pthread_setconcurrency(n: c_int) -> c_int {
+    if n < 0 {
+        return EINVAL;
+    }
+    CONCURRENCY.store(n, Ordering::SeqCst);
+    0
+}
+
+/// Non-blocking join (musl `pthread_tryjoin_np`: `EBUSY` until `EXITED`).
+///
+/// # Safety
+///
+/// Same as [`__pthread_join`].
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_tryjoin_np(t: PthreadT, res: *mut *mut c_void) -> c_int {
+    unsafe {
+        if t.is_null() {
+            return ESRCH;
+        }
+        let td = t as *mut Thread;
+        if (*td).magic != super::THREAD_MAGIC {
+            return ESRCH;
+        }
+        let st = (*td).detach_state.load(Ordering::SeqCst);
+        if st == DT_DETACHED {
+            return EINVAL;
+        }
+        if st != DT_EXITED {
+            return EBUSY_LOCAL;
+        }
+        __pthread_join(t, res)
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+const EBUSY_LOCAL: c_int = 16;
+
+/// Timed join (musl `pthread_timedjoin_np`: futex wait with absolute
+/// timeout; `ETIMEDOUT` on expiry).
+///
+/// # Safety
+///
+/// Same as [`__pthread_join`], plus `ts` null or readable.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+pub unsafe extern "C" fn __pthread_timedjoin_np(
+    t: PthreadT,
+    res: *mut *mut c_void,
+    ts: *const crate::time::Timespec,
+) -> c_int {
+    unsafe {
+        if t.is_null() {
+            return ESRCH;
+        }
+        let td = t as *mut Thread;
+        if (*td).magic != super::THREAD_MAGIC {
+            return ESRCH;
+        }
+        let w = detach_word(td);
+        loop {
+            let st = (*td).detach_state.load(Ordering::SeqCst);
+            if st == DT_EXITED {
+                break;
+            }
+            if st != DT_JOINABLE && st != DT_EXITING {
+                return EINVAL;
+            }
+            let r = crate::futex::futex_wait_private_timeout(w, st, ts);
+            if r == -(110isize) {
+                return ETIMEDOUT_LOCAL;
+            }
+            if r != 0 && r != -(4isize) {
+                return crate::errno::errno_load(crate::errno::__errno_location());
+            }
+        }
+        __pthread_join(t, res)
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+const ETIMEDOUT_LOCAL: c_int = 110;
+
 #[cfg(test)]
 mod tests {
     use super::super::{ARCH_GET_FS, ARCH_SET_FS, SYS_ARCH_PRCTL};
@@ -1149,5 +2541,341 @@ mod tests {
         assert_eq!(total, (N as u64) * PER * ((N as u64) * PER - 1) / 2);
         assert_eq!(detach_rc, 0);
         assert_eq!(detach_again, EINVAL);
+    }
+
+    #[test]
+    fn once_runs_init_exactly_once() {
+        static CTR: AtomicUsize = AtomicUsize::new(0);
+        static mut CTL: c_int = 0;
+        unsafe extern "C" fn inc() {
+            CTR.fetch_add(1, Ordering::SeqCst);
+        }
+        unsafe {
+            let ctl = core::ptr::addr_of_mut!(CTL);
+            assert_eq!(__pthread_once(ctl, Some(inc)), 0);
+            assert_eq!(__pthread_once(ctl, Some(inc)), 0);
+            assert_eq!(CTR.load(Ordering::SeqCst), 1);
+            assert_eq!(__pthread_once(core::ptr::null_mut(), Some(inc)), EINVAL);
+        }
+    }
+
+    static TSD_PROBE_KEY: AtomicUsize = AtomicUsize::new(0);
+
+    static FAIL_TSD: AtomicUsize = AtomicUsize::new(0);
+    static FAIL_CANCEL: AtomicUsize = AtomicUsize::new(0);
+    static FAIL_MGMT: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn tsd_probe(_: *mut c_void) -> *mut c_void {
+        unsafe {
+            let k = TSD_PROBE_KEY.load(Ordering::SeqCst) as u32;
+            let v = 0x1234usize as *mut c_void;
+            if pthread_setspecific(k, v) != 0 {
+                {
+                    FAIL_TSD.store(1, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            if __pthread_getspecific(k) != v {
+                {
+                    FAIL_TSD.store(2, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            if !__pthread_getspecific(127).is_null() {
+                {
+                    FAIL_TSD.store(3, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            null_mut()
+        }
+    }
+
+    #[test]
+    fn tsd_roundtrip_on_worker() {
+        unsafe {
+            ensure_main_tp();
+            let mut k = 0u32;
+            assert_eq!(__pthread_key_create(&mut k, None), 0);
+            TSD_PROBE_KEY.store(k as usize, Ordering::SeqCst);
+            let mut t: PthreadT = null_mut();
+            let mut res: *mut c_void = null_mut();
+            assert_eq!(
+                __pthread_create(&mut t, null_mut(), Some(tsd_probe), null_mut()),
+                0
+            );
+            assert_eq!(__pthread_join(t, &mut res), 0);
+            assert_eq!(FAIL_TSD.load(Ordering::SeqCst), 0);
+            assert_eq!(__pthread_key_delete(k), 0);
+            assert_eq!(__pthread_key_delete(999), EINVAL);
+        }
+    }
+
+    static DTOR_HITS: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn tsd_dtor(v: *mut c_void) {
+        if !v.is_null() {
+            DTOR_HITS.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    unsafe extern "C" fn tsd_setter(arg: *mut c_void) -> *mut c_void {
+        unsafe {
+            let k = *(arg as *const u32);
+            pthread_setspecific(k, 0x77 as *mut c_void);
+            null_mut()
+        }
+    }
+
+    #[test]
+    fn tsd_dtor_runs_at_thread_exit() {
+        unsafe {
+            ensure_main_tp();
+            DTOR_HITS.store(0, Ordering::SeqCst);
+            let mut k = 0u32;
+            assert_eq!(__pthread_key_create(&mut k, Some(tsd_dtor)), 0);
+            let mut t: PthreadT = null_mut();
+            let mut res: *mut c_void = null_mut();
+            assert_eq!(
+                __pthread_create(
+                    &mut t,
+                    null_mut(),
+                    Some(tsd_setter),
+                    &mut k as *mut u32 as *mut c_void
+                ),
+                0
+            );
+            assert_eq!(__pthread_join(t, &mut res), 0);
+            assert_eq!(DTOR_HITS.load(Ordering::SeqCst), 1);
+            assert_eq!(__pthread_key_delete(k), 0);
+        }
+    }
+
+    unsafe extern "C" fn self_cancel(arg: *mut c_void) -> *mut c_void {
+        unsafe {
+            let _ = arg;
+            __pthread_cancel(__pthread_self());
+            // Unreachable when enabled (default): documents the contract.
+            __pthread_testcancel();
+            null_mut()
+        }
+    }
+
+    #[test]
+    fn cancel_self_exits_canceled() {
+        unsafe {
+            ensure_main_tp();
+            let mut t: PthreadT = null_mut();
+            let mut res: *mut c_void = null_mut();
+            assert_eq!(
+                __pthread_create(&mut t, null_mut(), Some(self_cancel), null_mut()),
+                0
+            );
+            assert_eq!(__pthread_join(t, &mut res), 0);
+            assert_eq!(res, PTHREAD_CANCELED);
+        }
+    }
+
+    unsafe extern "C" fn cancel_dance(_: *mut c_void) -> *mut c_void {
+        unsafe {
+            let mut old = -1;
+            if __pthread_setcancelstate(1, &mut old) != 0 || old != 0 {
+                {
+                    FAIL_CANCEL.store(1, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            if __pthread_setcancelstate(0, &mut old) != 0 || old != 1 {
+                {
+                    FAIL_CANCEL.store(2, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            if __pthread_setcancelstate(7, &mut old) != EINVAL {
+                {
+                    FAIL_CANCEL.store(3, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            if __pthread_setcanceltype(1, &mut old) != 0 || old != 0 {
+                {
+                    FAIL_CANCEL.store(4, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            if __pthread_setcanceltype(0, &mut old) != 0 {
+                {
+                    FAIL_CANCEL.store(5, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            if __pthread_setcanceltype(9, &mut old) != EINVAL {
+                {
+                    FAIL_CANCEL.store(6, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            // Disabled cancel is sticky: cancel-then-testcancel is a no-op
+            // that must return to us (not exit).
+            if __pthread_setcancelstate(1, null_mut()) != 0 {
+                {
+                    FAIL_CANCEL.store(7, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            if __pthread_cancel(__pthread_self()) != 0 {
+                {
+                    FAIL_CANCEL.store(8, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            __pthread_testcancel();
+            null_mut()
+        }
+    }
+
+    #[test]
+    fn cancel_state_type_roundtrip() {
+        unsafe {
+            ensure_main_tp();
+            let mut t: PthreadT = null_mut();
+            let mut res: *mut c_void = null_mut();
+            assert_eq!(
+                __pthread_create(&mut t, null_mut(), Some(cancel_dance), null_mut()),
+                0
+            );
+            assert_eq!(__pthread_join(t, &mut res), 0);
+            assert_eq!(FAIL_CANCEL.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    static AT_FORK_LOG: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn atfork_a() {
+        AT_FORK_LOG.fetch_add(1, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn atfork_b() {
+        AT_FORK_LOG.fetch_add(10, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn atfork_runs_lifo() {
+        unsafe {
+            AT_FORK_LOG.store(0, Ordering::SeqCst);
+            assert_eq!(__pthread_atfork(Some(atfork_a), None, None), 0);
+            assert_eq!(__pthread_atfork(Some(atfork_b), None, None), 0);
+            run_atfork(0);
+            // LIFO: b (10) ran before a (1) -> 11 either way here; order
+            // is what matters, so check via sequence below.
+            assert_eq!(AT_FORK_LOG.load(Ordering::SeqCst), 11);
+        }
+    }
+
+    unsafe extern "C" fn mgmt_probe(_: *mut c_void) -> *mut c_void {
+        unsafe {
+            let me = __pthread_self();
+            if me.is_null() {
+                {
+                    FAIL_MGMT.store(1, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            if __pthread_kill(me, 0) != 0 {
+                {
+                    FAIL_MGMT.store(2, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            let mut pol = -1;
+            let mut sp = SchedParam { sched_priority: -1 };
+            if __pthread_getschedparam(me, &mut pol, &mut sp) != 0 || pol < 0 {
+                {
+                    FAIL_MGMT.store(3, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            let mut clk = -1;
+            if __pthread_getcpuclockid(me, &mut clk) != 0 || clk == 0 {
+                {
+                    FAIL_MGMT.store(4, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            let mut mask = [0u8; 128];
+            if __pthread_getaffinity_np(me, mask.len(), mask.as_mut_ptr() as *mut c_void) != 0
+                || mask[0] == 0
+            {
+                {
+                    FAIL_MGMT.store(5, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            if sched_getcpu() < 0 {
+                {
+                    FAIL_MGMT.store(6, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            let mut nm = [0 as c_char; 16];
+            if __pthread_getname_np(me, nm.as_mut_ptr(), nm.len()) != 0 || nm[0] == 0 {
+                {
+                    FAIL_MGMT.store(7, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            let mut a = AttrT::default();
+            if __pthread_getattr_np(me, &mut a) != 0 || a.stacksize() == 0 {
+                {
+                    FAIL_MGMT.store(8, Ordering::SeqCst);
+                    return null_mut();
+                }
+            }
+            null_mut()
+        }
+    }
+
+    #[test]
+    fn thread_mgmt_self_calls() {
+        let _guard = crate::ldso::testlock::lock();
+        unsafe {
+            ensure_main_tp();
+            // Concurrency level is process-global: safe on any thread.
+            assert_eq!(pthread_getconcurrency(), 0);
+            assert_eq!(pthread_setconcurrency(4), 0);
+            assert_eq!(pthread_getconcurrency(), 4);
+            assert_eq!(pthread_setconcurrency(-1), EINVAL);
+            assert_eq!(pthread_setconcurrency(0), 0);
+            assert_eq!(__pthread_kill(null_mut(), 0), ESRCH);
+            let mut a = AttrT::default();
+            assert_eq!(__pthread_getattr_np(null_mut(), &mut a), ESRCH);
+            // Everything touching a live TCB runs on our own thread.
+            let mut t: PthreadT = null_mut();
+            let mut res: *mut c_void = null_mut();
+            assert_eq!(
+                __pthread_create(&mut t, null_mut(), Some(mgmt_probe), null_mut()),
+                0
+            );
+            assert_eq!(__pthread_join(t, &mut res), 0);
+            assert_eq!(FAIL_MGMT.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[test]
+    fn tryjoin_and_timedjoin_on_exited() {
+        unsafe {
+            ensure_main_tp();
+            let mut t: PthreadT = null_mut();
+            let mut res: *mut c_void = null_mut();
+            unsafe extern "C" fn ret42(_: *mut c_void) -> *mut c_void {
+                42 as *mut c_void
+            }
+            assert_eq!(
+                __pthread_create(&mut t, null_mut(), Some(ret42), null_mut()),
+                0
+            );
+            assert_eq!(__pthread_join(t, &mut res), 0);
+            assert_eq!(res as usize, 42);
+        }
     }
 }

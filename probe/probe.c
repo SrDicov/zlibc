@@ -30,6 +30,8 @@
 #include <sys/shm.h> /* struct shmid_ds (Ola 10) */
 #include <sys/sem.h> /* struct semid_ds (Ola 10) */
 #include <mqueue.h> /* struct mq_attr (Ola 10) */
+#include <pthread.h> /* pthread_rwlock_t/barrier_t/spinlock_t/attr (Ola 11A) */
+#include <semaphore.h> /* sem_t (Ola 11A) */
 
 #define E(n, v) printf(#n " %lu\n", (unsigned long)(v))
 
@@ -238,5 +240,10 @@ int main(void)
 	E(SIZE_SEMID_DS, sizeof(struct semid_ds));
 	E(SIZE_MQ_ATTR, sizeof(struct mq_attr));
 	E(OFF_MQ_ATTR_MSGSIZE, offsetof(struct mq_attr, mq_msgsize));
+	E(SIZE_RWLOCK, sizeof(pthread_rwlock_t));
+	E(SIZE_RWLOCKATTR, sizeof(pthread_rwlockattr_t));
+	E(SIZE_BARRIER, sizeof(pthread_barrier_t));
+	E(SIZE_SPIN, sizeof(pthread_spinlock_t));
+	E(SIZE_SEM, sizeof(sem_t));
 	return 0;
 }

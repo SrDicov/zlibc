@@ -354,3 +354,13 @@ const _: () = assert!(PROBE_SIZE_SEMID_DS == size_of::<ipc::SemidDs>());
 const _: () = assert!(PROBE_SIZE_MQ_ATTR == size_of::<ipc::MqAttr>());
 #[cfg(target_arch = "x86_64")]
 const _: () = assert!(PROBE_OFF_MQ_ATTR_MSGSIZE == offset_of!(ipc::MqAttr, mq_msgsize));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_RWLOCK == size_of::<sync::RwlockT>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_RWLOCKATTR == size_of::<sync::RwlockAttrT>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_BARRIER == size_of::<sync::BarrierT>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_SPIN == size_of::<sync::SpinT>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_SEM == size_of::<sync::SemT>());

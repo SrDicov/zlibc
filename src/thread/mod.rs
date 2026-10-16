@@ -36,7 +36,7 @@ pub mod tls;
 pub mod unmapself;
 
 use core::ffi::{c_int, c_void};
-use core::sync::atomic::AtomicI32;
+use core::sync::atomic::{AtomicBool, AtomicI32};
 
 use crate::abi::PthreadHead;
 
@@ -226,9 +226,21 @@ pub struct Thread {
     /// this is our TCB to `errno.rs`. Appended last so every earlier
     /// offset (tid, detach word, errno cell) never moves.
     pub magic: u64,
-    // Deliberately absent (all OUT, see module docs): cancel state,
-    // cancel buffer, tsd/keys, robust list, locale, killlock, timer id,
-    // stdio locks, dlerror buffer. Each returns with its owning wave.
+    /// Deferred-cancel state (musl `canceldisable`: `PTHREAD_CANCEL_ENABLE`
+    /// 0 / `DISABLE` 1; cancellations act at cancel points only — no
+    /// async-signal machinery, see `__pthread_cancel`).
+    pub cancel_disable: AtomicI32,
+    /// Cancel type (musl `cancelasync`: 0 deferred, 1 async). Async only
+    /// takes effect at cancel points like deferred (shortcut, documented
+    /// at `__pthread_cancel`); the flag still reports exactly.
+    pub cancel_async: AtomicI32,
+    /// Cancellation requested by [`__pthread_cancel`](super::create::__pthread_cancel).
+    pub cancel_pending: AtomicBool,
+    /// Thread-specific values, musl `tsd[PTHREAD_KEYS_MAX]` (128).
+    pub tsd: [*mut c_void; 128],
+    // Deliberately absent (all OUT, see module docs): cancel buffer,
+    // robust list, locale, killlock, timer id, stdio locks, dlerror
+    // buffer. Each returns with its owning wave.
 }
 
 #[cfg(test)]
@@ -246,8 +258,8 @@ mod tests {
     #[test]
     fn thread_layout_matches_hand_computation() {
         assert_eq!(offset_of!(Thread, head), 0);
-        assert_eq!(size_of::<Thread>(), 136);
+        assert_eq!(size_of::<Thread>(), 1176);
         assert_eq!(size_of::<AttrT>(), 56);
-        assert_eq!(current_tls_size(), 160);
+        assert_eq!(current_tls_size(), 1200);
     }
 }
