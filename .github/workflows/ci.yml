@@ -213,3 +213,7 @@ jobs:
           echo "=== strace tail ==="
           strace -f -o /tmp/zlibc-smoke/trace.log /tmp/zlibc-smoke/hello-a || true
           tail -25 /tmp/zlibc-smoke/trace.log
+          echo "=== gdb backtrace (which instruction faults?) ==="
+          gdb --batch --ex run --ex bt --args /tmp/zlibc-smoke/hello-a 2>&1 | tail -20 || true
+          echo "=== section map around the fault addr ==="
+          readelf -SW /tmp/zlibc-smoke/ld-musl-x86_64.so.1 | grep -E 'Name|\.text|\.plt|\.got|\.rodata|\.data|\.dynamic' | head -12
