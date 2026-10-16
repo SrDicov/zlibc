@@ -208,7 +208,7 @@ jobs:
           test -f "$a"
           mkdir -p /tmp/zlibc-smoke
           echo "== entry symbols present =="
-          nm --defined-only "$a" 2>/dev/null | grep -wE '_dlstart|_dlstart_boot|_dlstart_c'
+          nm --defined-only "$a" 2>/dev/null | grep -wE '_dlstart|_dlstart_boot'
           # --whole-archive: an archive only donates members that resolve
           # an undefined symbol, and a freestanding libc has almost no
           # undefined references to trigger on (musl links loose objects
@@ -241,16 +241,25 @@ jobs:
           objdump -d --disassemble=_dlstart "$so"
           echo "== _dlstart_boot calls (want: no @plt) =="
           objdump -d --disassemble=_dlstart_boot "$so" | head -60
-          echo "== _dlstart_c head =="
-          objdump -d --disassemble=_dlstart_c "$so" | head -30
           echo "== pre-reloc indirect/GOT uses (want: none) =="
-          for f in _dlstart _dlstart_boot _dlstart_c find_auxv relocate_self zero_words decode_dyn decode_vec app_dso_from_aux envp_from_sp diag_boot diag_hex diag_raw; do
-            hits=$(objdump -d --disassemble="$f" "$so" | grep -E '@plt|@GOTPCREL|call \*|jmp \*|callq|jmpq' || true)
-            if [ -n "$hits" ]; then echo "== $f =="; echo "$hits" | head -8; fi
+          # Only these run before self-relocation completes: a call to an
+          # exported (preemptible) symbol binds through the GOT, which
+          # still holds link-time addresses (seen: boot jumped to the raw
+          # `_dlstart_c` address and died). Post-reloc helpers (decode_*,
+          # app_dso_*, envp_from_sp) are excluded on purpose: their
+          # indirect calls are legal. Rust-mangled names resolve via nm
+          # (objdump needs the exact symbol); unresolvable fails LOUD,
+          # never vacuous.
+          fail_pre=0
+          names=$(nm --defined-only "$so" | awk '{print $NF}')
+          for f in _dlstart _dlstart_boot _dlstart_c find_auxv relocate_self zero_words diag_boot diag_hex diag_raw; do
+            sym=$(echo "$names" | grep -x "$f" | head -1)
+            if [ -z "$sym" ]; then sym=$(echo "$names" | grep "$f" | head -1); fi
+            if [ -z "$sym" ]; then echo "::error pre-reloc fn $f unresolvable (gate would be vacuous)"; fail_pre=1; continue; fi
+            hits=$(objdump -d --disassemble="$sym" "$so" | grep -E '@plt|@GOTPCREL|call\s+\*|jmp\s+\*|callq|jmpq' || true)
+            if [ -n "$hits" ]; then echo "== $f ($sym) =="; echo "$hits" | head -8; fail_pre=1; fi
           done
-          pre=$(for f in _dlstart _dlstart_boot _dlstart_c find_auxv relocate_self zero_words decode_dyn decode_vec app_dso_from_aux envp_from_sp diag_boot diag_hex diag_raw; do objdump -d --disassemble="$f" "$so"; done | grep -E '@plt|@GOTPCREL|call \*|jmp \*|callq|jmpq' || true)
-          echo "$pre"
-          test -z "$pre"
+          test "$fail_pre" = 0
           echo "== GOT-filling relocs (want: only RELATIVE, no GLOB_DAT pre-reloc hazard) =="
           readelf -rW "$so" | awk '$3 ~ /GLOB_DAT|JUMP_SLOT/ {print}' | head -20
           echo "== RELATIVE count =="

@@ -211,9 +211,16 @@ pub unsafe extern "C" fn _dlstart() {
 ///
 /// `sp` must be the kernel stack (see [`find_auxv`]); `dynv` the
 /// `_DYNAMIC` word vector (`tag, val` pairs to `DT_NULL`).
+///
+/// Deliberately NOT exported: this runs before self-relocation, and a
+/// call to an exported (preemptible) symbol goes through the GOT —
+/// which still holds link-time addresses at that point (seen: boot
+/// jumped to the raw link address and died). Private means every call
+/// site binds direct. `#[inline(never)]` pins the out-of-line direct
+/// call (and the symbol the pre-reloc gate resolves).
 #[cfg(target_arch = "x86_64")]
-#[no_mangle]
-pub unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usize {
+#[inline(never)]
+unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usize {
     unsafe {
         let auxv = find_auxv(sp);
         super::boot::diag_boot(b"c: auxv found\n");
@@ -304,6 +311,20 @@ pub unsafe extern "C" fn _dlstart_boot(sp: *const usize, dynv: *const usize) -> 
         super::boot::diag_boot(b"dlstart: entered\n");
         let base = _dlstart_c(sp, dynv);
         super::boot::diag_boot(b"dlstart: self-relocated\n");
+        _dlstart_post(sp, dynv, base)
+    }
+}
+
+/// Post-relocation tail of [`_dlstart_boot`]: everything after
+/// `_dlstart_c` returns, so the GOT is valid and calls to exported
+/// (preemptible) helpers bind normally. Split out so the pre-reloc
+/// gate can scan `_dlstart_boot` whole-function: the entry prefix
+/// must contain no indirect transfer. `#[inline(never)]` keeps it
+/// that way (inlining would drag post-reloc GOT calls back in).
+#[cfg(all(not(test), target_arch = "x86_64"))]
+#[inline(never)]
+unsafe fn _dlstart_post(sp: *const usize, dynv: *const usize, base: usize) -> usize {
+    unsafe {
         let ldso = core::ptr::addr_of_mut!(super::boot::LDSO);
         (*ldso).base = base as *mut u8;
         (*ldso).dynv = dynv as *mut usize;
