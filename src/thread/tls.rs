@@ -119,10 +119,17 @@ pub(crate) unsafe fn set_tp(tp: usize) -> isize {
 }
 
 /// Read the thread pointer (`arch/x86_64/pthread_arch.h:1-6`).
+/// Uses `arch_prctl(ARCH_GET_FS)`: reading `%fs:0` directly faults when
+/// FS_BASE is 0 (the kernel clears it on exec), which is the normal
+/// pre-init state.
 pub(crate) fn get_tp() -> usize {
-    let tp: usize;
+    let mut tp: usize = 0;
     unsafe {
-        core::arch::asm!("mov %fs:0, {0}", out(reg) tp, options(att_syntax));
+        syscall2(
+            SYS_ARCH_PRCTL,
+            super::ARCH_GET_FS,
+            core::ptr::addr_of_mut!(tp) as usize,
+        );
     }
     tp
 }
@@ -175,5 +182,54 @@ pub(crate) fn ensure_main_tp() {
         // and failure here always means a kernel bug).
         let _ = set_tp(td as usize);
         DONE.store(true, Ordering::Release);
+    }
+}
+
+/// musl `__init_tls` (`src/env/__init_tls.c:16-153`) for the main thread:
+/// register the app's `PT_TLS` module, allocate the TCB + image block,
+/// copy the image below the TP, and set the thread pointer. Called from
+/// `__init_libc` before any TLS access. Without it the first `__thread`
+/// read hits an unmapped page (SIGSEGV).
+///
+/// When the app has no `PT_TLS`, falls back to [`ensure_main_tp`] (static
+/// TCB, no image).
+/// # Safety
+///
+/// Called once from `__init_libc` before any TLS access. The app DSO
+/// (`boot::APP`) must already be populated by the loader.
+pub unsafe fn init_main_tls() {
+    let app = core::ptr::addr_of_mut!(crate::ldso::boot::APP);
+    if unsafe { (*app).tls.size == 0 } {
+        ensure_main_tp();
+        return;
+    }
+    // musl `static_init_tls`: `main_tls.offset = main_tls.size`,
+    // align clamped to `MIN_TLS_ALIGN` (16).
+    let m: *mut crate::ldso::dso::TlsModule = unsafe { core::ptr::addr_of_mut!((*app).tls) };
+    unsafe {
+        (*m).offset = (*m).size;
+        if (*m).align < TLS_ALIGN {
+            (*m).align = TLS_ALIGN;
+        }
+        register_tls_module(m);
+    }
+    let size = current_tls_size();
+    // mmap anonymous RW for the TLS block (musl uses SYS_mmap2).
+    let mem = crate::__syscall!(
+        super::SYS_MMAP,
+        0,
+        size,
+        3,    // PROT_READ | PROT_WRITE
+        0x22, // MAP_PRIVATE | MAP_ANONYMOUS
+        usize::MAX,
+        0
+    ) as *mut u8;
+    if mem.is_null() || (mem as usize) > usize::MAX - size {
+        unsafe { core::arch::asm!("ud2", options(noreturn)) };
+    }
+    let td = unsafe { copy_tls(mem, size) };
+    let tp_rc = unsafe { set_tp(td as usize) };
+    if tp_rc < 0 {
+        unsafe { core::arch::asm!("ud2", options(noreturn)) };
     }
 }

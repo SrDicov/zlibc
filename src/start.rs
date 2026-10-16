@@ -180,6 +180,22 @@ crate::weak_alias!(environ, __environ);
 #[no_mangle]
 pub static mut __stack_chk_guard: usize = 0;
 
+/// musl `src/env/__stack_chk_fail.c:115` — trap on overflow, exactly as the
+/// name suggests; `a_crash()` (musl) = `ud2` on x86_64.
+/// Traps the process (`ud2`). Called by compiler-generated stack
+/// protector code when the canary is corrupted.
+///
+/// # Safety
+///
+/// Diverges unconditionally; never returns.
+#[cfg(not(test))]
+#[no_mangle]
+pub unsafe extern "C" fn __stack_chk_fail() {
+    unsafe {
+        core::arch::asm!("ud2", options(noreturn));
+    }
+}
+
 /// Process entry (x86_64). Replicates musl `arch/x86_64/crt_arch.h`:
 /// clear `rbp`, pass the initial `rsp` as `_start_c`'s argument, take the
 /// (weak, hidden) `_DYNAMIC` address in `rsi`, align `rsp` to 16, then
@@ -298,8 +314,7 @@ fn progname_short(pn: *const c_char) -> *const c_char {
 /// from `AT_RANDOM`, `__progname`/`__progname_full` from `argv[0]`, and
 /// the set-uid/set-gid/`AT_SECURE` early-return check (lines 42-43).
 /// `__environ` is installed here too (musl `__libc_start_main.c:26`).
-/// Deferred: `__init_tls` (Wave 3 owns the TP), `__sysinfo` (vdso, with
-/// B2/B3).
+/// Deferred: `__sysinfo` (vdso, with B2/B3).
 ///
 /// # Safety
 ///
@@ -309,6 +324,11 @@ fn progname_short(pn: *const c_char) -> *const c_char {
 #[cfg(not(test))]
 #[no_mangle]
 pub unsafe extern "C" fn __init_libc(envp: *mut *mut c_char, pn: *const c_char) {
+    // musl __init_tls runs before __init_ssp: the stack canary lives in
+    // the TCB, so the TP must exist first.
+    unsafe {
+        crate::thread::tls::init_main_tls();
+    }
     unsafe { core::ptr::addr_of_mut!(__environ).write(envp) };
     let mut n = 0usize;
     while !(unsafe { envp.wrapping_add(n).read() }).is_null() {
