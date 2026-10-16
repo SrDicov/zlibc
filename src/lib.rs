@@ -9,6 +9,8 @@ extern crate std;
 pub mod abi;
 #[cfg(target_arch = "x86_64")]
 pub mod dirent;
+#[cfg(target_arch = "x86_64")]
+pub mod epoll;
 pub mod errno;
 #[cfg(target_arch = "x86_64")]
 pub mod exit;
@@ -22,6 +24,8 @@ pub mod libm;
 pub mod locale;
 pub mod malloc;
 pub mod mem;
+#[cfg(target_arch = "x86_64")]
+pub mod misc;
 #[cfg(target_arch = "x86_64")]
 pub mod mman;
 pub mod net;
@@ -51,6 +55,8 @@ pub mod thread;
 pub mod unistd;
 #[cfg(target_arch = "x86_64")]
 pub mod validation;
+#[cfg(target_arch = "x86_64")]
+pub mod xattr;
 
 // OUT_DIR/abi_probed.rs is emitted by build.rs with sizes/offsets
 // measured from the real musl headers (see probe/probe.c).

@@ -4,6 +4,8 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <stdio.h>
+#include <sys/epoll.h>
+#include <sys/statvfs.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -51,6 +53,25 @@ int main(void) {
         printf("poll fail\n");
         return 1;
     }
+    // epoll sees the same byte.
+    int efd = epoll_create1(0);
+    if (efd < 0) {
+        printf("epoll_create fail\n");
+        return 1;
+    }
+    struct epoll_event ev;
+    ev.events = EPOLLIN;
+    ev.data.fd = p[0];
+    if (epoll_ctl(efd, EPOLL_CTL_ADD, p[0], &ev) != 0) {
+        printf("epoll_ctl fail\n");
+        return 1;
+    }
+    struct epoll_event rev[1];
+    if (epoll_wait(efd, rev, 1, 1000) != 1) {
+        printf("epoll_wait fail\n");
+        return 1;
+    }
+    close(efd);
     close(p[0]);
     close(p[1]);
     // A pipe is not a tty.
@@ -65,6 +86,12 @@ int main(void) {
             printf("isatty fail\n");
             return 1;
         }
+    }
+    // statvfs reports a block size.
+    struct statvfs sv;
+    if (statvfs("/tmp", &sv) != 0 || sv.f_bsize == 0) {
+        printf("statvfs fail\n");
+        return 1;
     }
     printf("8d ok\n");
     return 0;
