@@ -372,6 +372,8 @@ unsafe fn _dlstart_post(sp: *const usize, dynv: *const usize, base: usize) -> us
 mod tests {
     use super::{find_auxv, relocate_self, AT_BASE, AT_NULL, AT_PHDR, AT_PHENT, AT_PHNUM, DT_NULL};
     use super::{DT_REL, DT_RELA, DT_RELASZ, DT_RELR, DT_RELRSZ, DT_RELSZ, DYN_CNT};
+
+    use crate::ldso::testlock::lock;
     use core::mem::size_of;
 
     /// Fake kernel stack: argc, argv, NULL, env, NULL, auxv pairs.
@@ -431,6 +433,8 @@ mod tests {
     /// Bias from `AT_BASE` (the normal exec path, dlstart.c:104).
     #[test]
     fn bias_from_at_base() {
+        // _dlstart_c stages through shared AUX_BUF/DYNT_BUF: serialize.
+        let _guard = lock();
         let sp = fake_stack(&[AT_BASE, 0x7f00_0000, AT_NULL, 0]);
         let dynv = [DT_NULL, 0];
         let base = unsafe { super::_dlstart_c(sp.as_ptr(), dynv.as_ptr()) };
@@ -443,6 +447,8 @@ mod tests {
     /// consistency, not the real 56, is what matters).
     #[test]
     fn bias_from_phdr_scan() {
+        // _dlstart_c stages through shared AUX_BUF/DYNT_BUF: serialize.
+        let _guard = lock();
         // Two PT_DYNAMICs: the LAST one wins (musl walks backward).
         let mut phdrs = [0u64; 20];
         phdrs[0] = 2; // p_type PT_DYNAMIC
