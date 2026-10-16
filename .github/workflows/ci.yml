@@ -57,6 +57,13 @@ jobs:
       - name: Test (release codegen, serial)
         run: 'timeout 300 cargo test --release -- --test-threads=1'
 
+      - name: Diagnose release-test crash on failure
+        if: failure()
+        run: |
+          sudo apt-get install -y gdb
+          bin=$(echo target/release/deps/zlibc-*.d | head -1); bin=${bin%.d}
+          gdb --batch --ex run --ex bt --args "$bin" --test-threads=1 2>&1 | tail -25 || true
+
       - name: Build (x86_64-unknown-linux-musl, release)
         run: cargo build --release --target x86_64-unknown-linux-musl
       # A byte-loop in a `#[no_mangle] memcpy` that LLVM turns into a call
