@@ -421,6 +421,15 @@ jobs:
           test "$out" = "string ok"
           echo "gate-string ran: $out"
 
+      - name: Build and run gate-regex (regcomp/regexec/fnmatch)
+        run: |
+          set -e
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc smoke/gate-regex.c -o /tmp/zlibc-smoke/gate-regex -Wl,--dynamic-linker,$so
+          out=$(timeout 10 /tmp/zlibc-smoke/gate-regex)
+          test "$out" = "regex ok"
+          echo "gate-regex ran: $out"
+
       - name: Diagnose cold boot on failure
         if: failure()
         run: |

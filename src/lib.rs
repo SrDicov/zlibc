@@ -44,9 +44,8 @@ pub mod prng;
 pub mod process;
 #[cfg(target_arch = "x86_64")]
 pub mod pty;
-// WO-9C-4 pending (backend rate-limit): re-enable with src/regex.rs.
-// #[cfg(target_arch = "x86_64")]
-// pub mod regex;
+#[cfg(target_arch = "x86_64")]
+pub mod regex;
 #[cfg(target_arch = "x86_64")]
 pub mod setjmp;
 #[cfg(target_arch = "x86_64")]

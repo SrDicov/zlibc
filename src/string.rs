@@ -163,8 +163,19 @@ pub unsafe extern "C" fn strncpy(d: *mut c_char, s: *const c_char, n: usize) -> 
 /// `dest` must fit `strlen(src)+1` bytes; ranges must not overlap.
 #[no_mangle]
 pub unsafe extern "C" fn strcpy(dest: *mut c_char, src: *const c_char) -> *mut c_char {
+    // Inline loop, not a stpcpy() call: fully-inlined same-module
+    // forwarder calls are deleted as side-effect-free in release
+    // (observed: strcpy/strcat bodies reduced to mov+ret). A memcpy
+    // intrinsic or duplicated loop both survive; the loop mirrors musl.
     unsafe {
-        stpcpy(dest, src);
+        let mut dd = dest;
+        let mut ss = src;
+        while *ss != 0 {
+            *dd = *ss;
+            dd = dd.add(1);
+            ss = ss.add(1);
+        }
+        *dd = 0;
         dest
     }
 }
@@ -249,10 +260,18 @@ pub unsafe extern "C" fn stpncpy(d: *mut c_char, s: *const c_char, n: usize) -> 
 /// `dest` must fit `strlen(dest)+strlen(src)+1`; ranges must not overlap.
 #[no_mangle]
 pub unsafe extern "C" fn strcat(dest: *mut c_char, src: *const c_char) -> *mut c_char {
+    // Same no-forwarder rule as strcpy above: inline the append loop.
     unsafe {
-        stpcpy(dest.add(raw_len(dest)), src);
+        let mut dd = dest.add(raw_len(dest));
+        let mut ss = src;
+        while *ss != 0 {
+            *dd = *ss;
+            dd = dd.add(1);
+            ss = ss.add(1);
+        }
+        *dd = 0;
+        dest
     }
-    dest
 }
 
 /// musl `strncat` (`src/string/strncat.c`): append at most `n` bytes plus
@@ -1789,6 +1808,59 @@ mod tests {
                 1,
             );
             assert_eq!(&d, &[2, 1, 4, 3, 0x7f]);
+        }
+    }
+    /// `strcpy`/`strcat` copy bytes (regression: release once folded
+    /// same-module forwarder calls into `mov`+`ret` stubs, caught only by
+    /// content asserts — never ship an unwired public fn without one).
+    #[test]
+    fn strcpy_strcat_copy_content() {
+        unsafe {
+            let mut d = [0 as c_char; 16];
+            let s = c"sub1";
+            assert_eq!(
+                crate::string::strcpy(d.as_mut_ptr(), s.as_ptr()),
+                d.as_mut_ptr()
+            );
+            assert_eq!(
+                &d[..5],
+                &[b's' as c_char, b'u' as _, b'b' as _, b'1' as _, 0]
+            );
+            assert_eq!(
+                crate::string::strcat(d.as_mut_ptr(), c"!".as_ptr()),
+                d.as_mut_ptr()
+            );
+            assert_eq!(
+                &d[..7],
+                &[
+                    b's' as c_char,
+                    b'u' as _,
+                    b'b' as _,
+                    b'1' as _,
+                    b'!' as _,
+                    0,
+                    0
+                ]
+            );
+        }
+    }
+
+    /// `strchrnul` returns the terminator on a miss; `strnlen` caps.
+    #[test]
+    fn strchrnul_strnlen_edges() {
+        unsafe {
+            let s = c"abc";
+            assert_eq!(
+                crate::string::strchrnul(s.as_ptr(), 'x' as core::ffi::c_int),
+                s.as_ptr().cast_mut().add(3)
+            );
+            assert_eq!(
+                crate::string::strchrnul(s.as_ptr(), 'b' as core::ffi::c_int),
+                s.as_ptr().cast_mut().add(1)
+            );
+            assert_eq!(crate::string::strnlen(s.as_ptr(), 10), 3);
+            assert_eq!(crate::string::strnlen(s.as_ptr(), 2), 2);
+            assert_eq!(crate::string::strnlen(s.as_ptr(), 0), 0);
         }
     }
 }
