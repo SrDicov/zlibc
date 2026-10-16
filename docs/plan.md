@@ -610,6 +610,46 @@ B:14 V:10`). The Alpine minirootfs artifact in `matrix/` is musl
 `V` class count matches exactly, the `T/W` delta is version drift, not
 a filter bug. Gate denominator stays 1650.
 
+## Wave 7 packet 6E close-out — TLS/pthread/COPY (x86_64)
+
+Gate 6E is now **5 binaries green** in `smoke-6e-a` (all on `ws/6e-1`):
+`hello-a`, `gate-deps` (DT_NEEDED), `gate-tls` (PT_TLS initial-exec
+`__thread`), `gate-pthread` (create/mutex/join), `gate-copy`
+(R_X86_64_COPY of `stdout`).
+
+Root causes closed:
+
+- **No `__init_tls` on the main thread.** `__init_libc` deferred TLS to
+  "Wave 3", so the first `__thread` read hit an empty TLS image
+  (SIGSEGV). musl runs `__init_tls` *before* `__init_ssp`
+  (`__libc_start_main.c:38-39`) because the stack canary lives in the
+  TCB. Fix 1:1: new `thread::tls::init_main_tls` (register app PT_TLS
+  module, `offset = size`, align ≥ 16, mmap block, `copy_tls`,
+  `arch_prctl(ARCH_SET_FS)`), called first in `__init_libc`; falls back
+  to `ensure_main_tp` when the app has no PT_TLS.
+- **`get_tp` faulted with FS_BASE = 0.** Reading `%fs:0` directly traps
+  when the kernel-cleared FS base is still 0 (normal pre-init state).
+  Fix: read the base via `arch_prctl(ARCH_GET_FS)` instead of the
+  segment load.
+- **Missing `__stack_chk_fail`.** musl-gcc emits stack-protector calls
+  in threaded code; without the symbol the loader took the hard
+  "symbol not found" path (exit 127). Fix: `__stack_chk_fail` → `ud2`
+  (musl `a_crash` equivalent).
+- `gate-copy` passed with zero new code: COPY relocs (v0.20) already
+  resolve libc data (`stdout`) into the executable's `.bss`.
+
+Toolchain lessons:
+
+- Local musl 1.2.6 built from `/home/dicov/musl` + `make install`
+  gives `musl-gcc` in `/usr/local/musl/bin` (symlinked to
+  `/usr/local/bin`): full smoke iteration in seconds, no CI round-trip.
+- Rust 2024 edition: `unsafe fn` bodies need explicit inner `unsafe`
+  blocks (E0133), but an outer block wrapping a `__syscall!` invocation
+  trips `unused_unsafe` — use small targeted blocks, never one big
+  wrapper around the macro.
+- `addr_of_mut!((*ptr).field)` must not nest an inner `unsafe` (E0745
+  temporary); write it bare inside an explicit outer `unsafe` block.
+
 ## "100% done" criteria
 
 - All public musl x86_64 symbols present with correct signature/ABI.
