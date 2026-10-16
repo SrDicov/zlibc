@@ -17,7 +17,7 @@ set -eu
 export LC_ALL=C
 
 # Lowest source-level count known green. Fase 0: 117.
-FLOOR=207
+FLOOR=247
 
 root=$(dirname "$0")/..
 baseline=$root/tools/musl-exports.txt
@@ -37,6 +37,9 @@ src=$root/src
     # definition, so the fn-name grep above misses them): va_trampoline!
     # today (printf/fprintf/snprintf in stdio.rs); extend per macro.
     grep -rhoE 'va_trampoline!\([A-Za-z_][A-Za-z_0-9]*' "$src" --include='*.rs' \
+        | sed 's/.*(//'
+    # Same for the exec trampolines (execl/execle/execlp in process.rs).
+    grep -rhoE 'exec_trampoline!\([A-Za-z_][A-Za-z_0-9]*' "$src" --include='*.rs' \
         | sed 's/.*(//'
 } | sort -u > /tmp/zlibc-syms.$$
 trap 'rm -f /tmp/zlibc-syms.$$ /tmp/zlibc-base.$$' EXIT

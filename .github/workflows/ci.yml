@@ -381,6 +381,15 @@ jobs:
           test "$out" = "syscall ok"
           echo "gate-syscall ran: $out"
 
+      - name: Build and run gate-process (fork/exec/spawn)
+        run: |
+          set -e
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc smoke/gate-process.c -o /tmp/zlibc-smoke/gate-process -Wl,--dynamic-linker,$so
+          out=$(timeout 15 /tmp/zlibc-smoke/gate-process)
+          test "$out" = "process ok"
+          echo "gate-process ran: $out"
+
       - name: Diagnose cold boot on failure
         if: failure()
         run: |

@@ -25,9 +25,13 @@ pub mod mman;
 pub mod net;
 pub mod panic;
 #[cfg(target_arch = "x86_64")]
+pub mod process;
+#[cfg(target_arch = "x86_64")]
 pub mod setjmp;
 #[cfg(target_arch = "x86_64")]
 pub mod signal;
+#[cfg(target_arch = "x86_64")]
+pub mod spawn;
 pub mod start;
 #[cfg(target_arch = "x86_64")]
 pub mod stat;
