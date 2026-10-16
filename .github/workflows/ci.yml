@@ -155,7 +155,9 @@ jobs:
           echo "== archive members =="
           ar t "$a" | head -8
           echo "== no_mangle probes in archive =="
-          nm --defined-only "$a" 2>/dev/null | grep -E ' (malloc|_dlstart|printf|memcpy|_start|__errno_location|__libc_start_main|_Exit)$' | head -20
+          nm --defined-only "$a" 2>/dev/null | grep -E 'dlstart' | head -20
+          echo "== _start-ish globals =="
+          nm --defined-only "$a" 2>/dev/null | grep -E ' _?start' | head -10
           echo "== global T count =="
           nm --defined-only "$a" 2>/dev/null | grep -c ' T ' 
           # --whole-archive: an archive only donates members that resolve
