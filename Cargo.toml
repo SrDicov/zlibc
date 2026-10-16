@@ -6,8 +6,9 @@ description = "Rust rewrite of musl libc (ABI-exact, no_std)"
 license = "GPL-3.0-only"
 
 [lib]
-# rlib for now; cdylib/staticlib once the linkable libc is assembled.
-crate-type = ["rlib"]
+# rlib for unit tests and the hello bins; cdylib for the 6E gate, where
+# the file itself is the interpreter + libc under test.
+crate-type = ["cdylib", "rlib"]
 
 # NOTE: no compiler_builtins dependency on purpose. The crates.io
 # releases require a nightly compiler (unconditional #![feature]), so

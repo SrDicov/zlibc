@@ -121,3 +121,51 @@ jobs:
           test "$out" = "$exp"
           out=$(./target/debug/hello-fs)
           test "$out" = "fs ok 11 bytes"
+
+  # Gate 6E smoke (a): a musl-gcc hello running on OUR libc.so as its
+  # interpreter. Binary (a) is first because it exercises the whole cold
+  # path with one moving part (printf); (c), (d), (e) add TLS, threads
+  # and COPY on top of a green (a). The hello is linked with an explicit
+  # --dynamic-linker (no patchelf, nothing under /lib is touched).
+  smoke-6e-a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch musl headers source (SrDicov mirror)
+        run: git clone --depth 1 https://github.com/SrDicov/musl.git "$MUSL_SRC"
+
+      - name: Install Rust stable + musl target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+          components: clippy, rustfmt
+
+      - name: Install musl-gcc
+        run: sudo apt-get install -y musl-tools
+
+      - name: Build the linkable libc (cdylib)
+        run: cargo build --release --verbose --target x86_64-unknown-linux-musl
+
+      - name: Inspect the interpreter candidate
+        run: |
+          so=$(echo target/x86_64-unknown-linux-musl/release/libzlibc.so)
+          test -f "$so"
+          echo "== entry =="
+          readelf -h "$so" | grep -i entry
+          echo "== UNDEF imports (want: none) =="
+          nm -D --undefined-only "$so" | head -20
+          test -z "$(nm -D --undefined-only "$so")"
+          echo "== _dlstart exported =="
+          nm -D --defined-only "$so" | grep -w _dlstart
+          echo "== hello's view of libc =="
+          mkdir -p /tmp/zlibc-smoke
+          cp "$so" /tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc -Wl,--dynamic-linker,/tmp/zlibc-smoke/ld-musl-x86_64.so.1 \
+            -o /tmp/zlibc-smoke/hello-a smoke/hello-a.c
+          readelf -d /tmp/zlibc-smoke/hello-a | grep -iE 'interp|needed'
+
+      - name: Run hello-a on zlibc
+        run: |
+          out=$(/tmp/zlibc-smoke/hello-a)
+          test "$out" = "hello from zlibc 41"
