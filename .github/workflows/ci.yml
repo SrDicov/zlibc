@@ -289,6 +289,19 @@ jobs:
 
       # Diagnostic on failure only: stage markers show how far the cold
       # boot got, strace shows the syscall trail to the fault.
+      - name: Build and run gate-deps (DT_NEEDED, own libmine.so)
+        run: |
+          set -e
+          mkdir -p /tmp/zlibc-gate-deps
+          cat smoke/mine.c > /tmp/zlibc-gate-deps/mine.c
+          musl-gcc -shared -fPIC -o /tmp/zlibc-gate-deps/libmine.so /tmp/zlibc-gate-deps/mine.c
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          gcc_interp_opts="-Wl,--dynamic-linker,$so -Wl,-rpath,/tmp/zlibc-gate-deps -L/tmp/zlibc-gate-deps -lmine"
+          musl-gcc smoke/gate-deps.c -o /tmp/zlibc-smoke/gate-deps -Wl,--dynamic-linker,$so -Wl,-rpath,/tmp/zlibc-gate-deps -L/tmp/zlibc-gate-deps -lmine
+          out=$(/tmp/zlibc-smoke/gate-deps)
+          test "$out" = "gate-deps 42"
+          echo "gate-deps ran: $out"
+
       - name: Diagnose cold boot on failure
         if: failure()
         run: |

@@ -7,5 +7,11 @@
 //! script and dependency link untouched.
 
 fn main() {
+    let libdir =
+        std::env::var("ZLIBC_GATE_LIBDIR").unwrap_or_else(|_| "/tmp/zlibc-gate-deps".to_string());
+    // Optional search path for gate binaries that carry a DT_NEEDED edge
+    // to their own shared object; harmless on the regular hello bins.
+    println!("cargo:rustc-link-search=native={libdir}");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{libdir}");
     println!("cargo:rustc-link-arg=-nostdlib");
 }
