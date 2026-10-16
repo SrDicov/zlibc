@@ -403,6 +403,15 @@ jobs:
           test "$out" = "stdio ok"
           echo "gate-stdio ran: $out"
 
+      - name: Build and run gate-8d (dirent + poll + termios)
+        run: |
+          set -e
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc smoke/gate-8d.c -o /tmp/zlibc-smoke/gate-8d -Wl,--dynamic-linker,$so
+          out=$(timeout 10 /tmp/zlibc-smoke/gate-8d)
+          test "$out" = "8d ok"
+          echo "gate-8d ran: $out"
+
       - name: Diagnose cold boot on failure
         if: failure()
         run: |
