@@ -225,7 +225,11 @@ pub unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usi
                 }
             }
         }
+        super::boot::diag_hex(b"aux_base=", aux[AT_BASE]);
+        super::boot::diag_hex(b"dynv=", dynv as usize);
+        super::boot::diag_hex(b"base=", base);
         relocate_self(base, &dynt);
+        super::boot::diag_hex(b"relocated=", base);
         base
     }
 }

@@ -613,6 +613,32 @@ unsafe fn search_bare(
 /// errno, without malloc, without TLS — callable from any boot stage.
 /// libtest captures fd 2 per test, so unit tests stay quiet.
 pub(crate) fn diag_boot(msg: &[u8]) {
+    diag_raw(msg);
+}
+
+/// DIAG (transient, 6E bring-up): `label=value` in hex, raw bytes.
+pub(crate) fn diag_hex(label: &[u8], v: usize) {
+    diag_raw(label);
+    let mut digits = [0u8; 16];
+    let mut i = 0usize;
+    let mut x = v;
+    loop {
+        let d = (x & 0xf) as u8;
+        digits[i] = if d < 10 { b'0' + d } else { b'a' + d - 10 };
+        i += 1;
+        x >>= 4;
+        if x == 0 {
+            break;
+        }
+    }
+    while i > 0 {
+        i -= 1;
+        diag_raw(&digits[i..i + 1]);
+    }
+    diag_raw(b"\n");
+}
+
+fn diag_raw(msg: &[u8]) {
     unsafe {
         crate::syscall::syscall3(crate::syscall::SYS_WRITE, 2, msg.as_ptr() as usize, msg.len());
     }
