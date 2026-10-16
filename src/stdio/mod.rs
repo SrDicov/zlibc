@@ -214,6 +214,17 @@ unsafe fn flush_locked(f: *mut File) -> bool {
     }
 }
 
+/// Flush, or grow when the stream owns no fd (memstreams accumulate
+/// instead of dumping to `/dev/null`; lock held).
+unsafe fn flush_or_grow_locked(f: *mut File, need: usize) -> bool {
+    unsafe {
+        if ((*f).flags & crate::stdio::file::F_MEM) != 0 {
+            return crate::stdio::file::mem_grow(f, need) == 0;
+        }
+        flush_locked(f)
+    }
+}
+
 /// Buffer one byte for output; flushes on full buffer (and on newline
 /// when line-buffered). Unbuffered streams write through. (Lock held.)
 unsafe fn put_byte_locked(f: *mut File, b: u8) -> bool {
@@ -221,16 +232,16 @@ unsafe fn put_byte_locked(f: *mut File, b: u8) -> bool {
         if (*f).cap == 0 || (*f).buf.is_null() {
             return write_all(f, &b, 1);
         }
-        if (*f).wpos >= (*f).cap && !flush_locked(f) {
+        if (*f).wpos >= (*f).cap && !flush_or_grow_locked(f, (*f).wpos + 1) {
             return false;
         }
         (*(*f).buf.add((*f).wpos)) = b;
         (*f).wpos += 1;
         if (*f).line_buf && b == b'\n' {
-            return flush_locked(f);
+            return flush_or_grow_locked(f, (*f).wpos);
         }
         if (*f).wpos >= (*f).cap {
-            return flush_locked(f);
+            return flush_or_grow_locked(f, (*f).wpos + 1);
         }
         true
     }
@@ -330,14 +341,24 @@ pub unsafe extern "C" fn fflush(f: *mut File) -> c_int {
         slock();
         ensure_locked();
         let mut rc = 0;
+        use crate::stdio::file::F_MEM;
+        // Memstreams publish through MEMTAB, not an fd: fold + sync
+        // instead of flushing (a flush would dump the window to
+        // /dev/null and lose it). fflush(NULL) covers all streams.
         if f.is_null() {
             let mut cur = addr_of_mut!(OPEN_LIST).read();
             while !cur.is_null() {
-                if !flush_locked(cur) {
+                if ((*cur).flags & F_MEM) != 0 {
+                    crate::stdio::file::mem_fold(cur);
+                    crate::stdio::file::mem_sync(cur);
+                } else if !flush_locked(cur) {
                     rc = EOF;
                 }
                 cur = (*cur).next;
             }
+        } else if ((*f).flags & F_MEM) != 0 {
+            crate::stdio::file::mem_fold(f);
+            crate::stdio::file::mem_sync(f);
         } else if !flush_locked(f) {
             rc = EOF;
         }
@@ -474,7 +495,17 @@ pub unsafe extern "C" fn fclose(f: *mut File) -> c_int {
         }
         slock();
         ensure_locked();
-        let ok = flush_locked(f);
+        use crate::stdio::file::F_MEM;
+        // Memstreams never touch the fd: publish + detach, skip the
+        // flush (it would dump the window to /dev/null and lose it).
+        let ok = if (*f).flags & F_MEM != 0 {
+            crate::stdio::file::mem_fold(f);
+            crate::stdio::file::mem_sync(f);
+            crate::stdio::file::mem_forget(f);
+            true
+        } else {
+            flush_locked(f)
+        };
         let fd = (*f).fd;
         (*f).fd = -1;
         let std = f == addr_of_mut!(STDIN_FILE)
@@ -552,7 +583,10 @@ pub unsafe extern "C" fn fwrite(p: *const c_void, size: usize, n: usize, f: *mut
             }
             let space = (*f).cap - (*f).wpos;
             if space == 0 {
-                ok = flush_locked(f);
+                ok = flush_or_grow_locked(f, (*f).wpos + left);
+                if !ok {
+                    break;
+                }
                 continue;
             }
             let step = space.min(left);
@@ -566,14 +600,14 @@ pub unsafe extern "C" fn fwrite(p: *const c_void, size: usize, n: usize, f: *mut
                 let mut k = (*f).wpos - step;
                 while k < (*f).wpos {
                     if *(*f).buf.add(k) == b'\n' {
-                        ok = flush_locked(f);
+                        ok = flush_or_grow_locked(f, (*f).wpos);
                         break;
                     }
                     k += 1;
                 }
             }
             if left > 0 && (*f).wpos >= (*f).cap {
-                ok = flush_locked(f);
+                ok = flush_or_grow_locked(f, (*f).wpos + left);
             }
         }
         sunlock();

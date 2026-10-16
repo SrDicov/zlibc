@@ -73,7 +73,7 @@ const ECHILD: c_int = 10;
 
 /// Our bit: memory-backed stream (`/dev/null` fd, data in the buffer).
 #[cfg(target_arch = "x86_64")]
-const F_MEM: u32 = 1 << 30;
+pub(crate) const F_MEM: u32 = 1 << 30;
 
 /// musl `SYS_exit` / `SYS_exit_group` (x86_64).
 #[cfg(target_arch = "x86_64")]
@@ -255,7 +255,7 @@ unsafe fn mem_slot(f: *mut File) -> (*mut *mut c_char, *mut usize) {
 
 /// Forget a memstream's cells without touching the buffer (lock held).
 #[cfg(target_arch = "x86_64")]
-unsafe fn mem_forget(f: *mut File) {
+pub(crate) unsafe fn mem_forget(f: *mut File) {
     unsafe {
         let mut i = 0usize;
         while i < TAB_MAX {
@@ -271,7 +271,7 @@ unsafe fn mem_forget(f: *mut File) {
 /// Fold pending writes into the readable length and keep musl's trailing
 /// NUL (`buf[len] == 0` while it fits). Returns the length (lock held).
 #[cfg(target_arch = "x86_64")]
-unsafe fn mem_fold(f: *mut File) -> usize {
+pub(crate) unsafe fn mem_fold(f: *mut File) -> usize {
     unsafe {
         let len = (*f).rlen.max((*f).wpos);
         if len < (*f).cap && !(*f).buf.is_null() {
@@ -283,7 +283,7 @@ unsafe fn mem_fold(f: *mut File) -> usize {
 
 /// Refresh the caller's `*sizep` from the folded length (lock held).
 #[cfg(target_arch = "x86_64")]
-unsafe fn mem_sync(f: *mut File) {
+pub(crate) unsafe fn mem_sync(f: *mut File) {
     unsafe {
         let (_, sp) = mem_slot(f);
         if !sp.is_null() {
@@ -295,7 +295,7 @@ unsafe fn mem_sync(f: *mut File) {
 /// Grow a memstream's buffer past `need` (lock held). Zeroes the new
 /// area like musl; updates the stream and the caller's `*bufp`.
 #[cfg(target_arch = "x86_64")]
-unsafe fn mem_grow(f: *mut File, need: usize) -> c_int {
+pub(crate) unsafe fn mem_grow(f: *mut File, need: usize) -> c_int {
     unsafe {
         let (bp, _) = mem_slot(f);
         if bp.is_null() {

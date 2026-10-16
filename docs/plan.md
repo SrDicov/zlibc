@@ -787,6 +787,33 @@ verde siempre; CI es gate, no muleta.
   solo-docs era el flake, no el commit. `git stash` + rebuild para
   culpar al código antes de revertir a ciegas.
 
+## Ola 10 (red/dns/passwd/ipc/sysconf, `ws/6e-1`): 585 -> 751 simbolos
+
+Entregado y verde (12 gates + 435 lib tests + CI): `src/sockext.rs`
+(sendmsg/recvmsg/mmsg, byte-order, inet_pton/ntop v4+v6, if_*, getifaddrs
+via SIOCGIFCONF — sin netlink/v6 documentado, ether_*), `src/dns.rs`
+(getaddrinfo/getnameinfo/res_* + servicios/protocolos), `src/passwd.rs`
+(pwent/grent/spent + getgrouplist/initgroups), `src/ipc.rs` (SysV
+msg/sem/shm + POSIX mq/aio) y `src/sysconf.rs` (sysconf/confstr/pathconf,
+rlimit/prlimit/getrusage/uname/sysinfo/hostname/syslog, crypt DES+MD5+
+SHA256+SHA512 byte-exact contra oraculos musl/glibc, mntent, utmpx stubs).
+
+Cazas de la ola: (1) `msgctl(q, 0x100)` -> EINVAL en kernels modernos —
+`ipc_cmd` verbatim (glibc y musl pasan verbatim); (2) `mq_receive` exige
+buffer >= `mq_msgsize`, no >= mensaje (test mal, no impl); (3) memstreams
+nunca tocaban el fd: `flush_or_grow_locked` + fold/sync en
+`fflush`/`fclose` (integracion pendiente de 8C); (4) DES key-schedule rota
+28 bits, no 32 (`rotate_left` envenena subkeys); (5) `NUL`-terminate
+dinamico en tests (`format!` + `\0` separado para fs vs C); (6) solo bit0
+por byte es significativo en `encrypt` (test comparaba bytes); (7)
+`LD_PRELOAD=libmimalloc.so` del host aborta los test binaries
+(`env -u LD_PRELOAD` para runs locales); (8) tablas C->Rust generadas
+mecanicamente (DES/MD5/SHA-K), jamas transcritas a mano.
+
+Reglas nuevas: `c"..."` literals (clippy `manual_c_str_literals` niega
+`b"...\0"`); `#[unsafe(naked)]` literal para variadics (el gate no ve
+dentro de `va_trampoline!`); probe ABI 114 -> 142 asserts.
+
 ## "100% done" criteria
 
 - All public musl x86_64 symbols present with correct signature/ABI.

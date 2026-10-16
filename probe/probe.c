@@ -18,6 +18,18 @@
 #include <sys/types.h> /* dev_t/ino_t for the dso probe */
 #include <sys/stat.h> /* struct stat: the loader's (st_dev, st_ino) dedup key */
 #include "libc.h" /* struct tls_module (src/internal/libc.h:14-18) for the dso probe */
+#include <netdb.h> /* struct addrinfo (Ola 10) */
+#include <netinet/in.h> /* struct sockaddr_in/in6 (Ola 10) */
+#include <pwd.h> /* struct passwd (Ola 10) */
+#include <grp.h> /* struct group (Ola 10) */
+#include <shadow.h> /* struct spwd (Ola 10) */
+#include <sys/resource.h> /* struct rlimit/rusage (Ola 10) */
+#include <sys/utsname.h> /* struct utsname (Ola 10) */
+#include <sys/sysinfo.h> /* struct sysinfo (Ola 10) */
+#include <sys/msg.h> /* struct msqid_ds (Ola 10) */
+#include <sys/shm.h> /* struct shmid_ds (Ola 10) */
+#include <sys/sem.h> /* struct semid_ds (Ola 10) */
+#include <mqueue.h> /* struct mq_attr (Ola 10) */
 
 #define E(n, v) printf(#n " %lu\n", (unsigned long)(v))
 
@@ -198,5 +210,33 @@ int main(void)
 	E(OFF_DSO_GOT, offsetof(struct zlibc_dso, got));
 	E(OFF_STAT_DEV, offsetof(struct stat, st_dev));
 	E(OFF_STAT_INO, offsetof(struct stat, st_ino));
+	E(SIZE_ADDRINFO, sizeof(struct addrinfo));
+	E(OFF_ADDRINFO_ADDR, offsetof(struct addrinfo, ai_addr));
+	E(SIZE_SOCKADDR_IN, sizeof(struct sockaddr_in));
+	E(OFF_SOCKADDR_IN_ADDR, offsetof(struct sockaddr_in, sin_addr));
+	E(SIZE_SOCKADDR_IN6, sizeof(struct sockaddr_in6));
+	E(OFF_SOCKADDR_IN6_ADDR, offsetof(struct sockaddr_in6, sin6_addr));
+	E(SIZE_PASSWD, sizeof(struct passwd));
+	E(OFF_PASSWD_NAME, offsetof(struct passwd, pw_name));
+	E(OFF_PASSWD_UID, offsetof(struct passwd, pw_uid));
+	E(SIZE_GROUP, sizeof(struct group));
+	E(OFF_GROUP_NAME, offsetof(struct group, gr_name));
+	E(OFF_GROUP_GID, offsetof(struct group, gr_gid));
+	E(SIZE_SPWD, sizeof(struct spwd));
+	E(OFF_SPWD_NAME, offsetof(struct spwd, sp_namp));
+	E(SIZE_RLIMIT, sizeof(struct rlimit));
+	E(OFF_RLIMIT_MAX, offsetof(struct rlimit, rlim_max));
+	E(SIZE_RUSAGE, sizeof(struct rusage));
+	E(OFF_RUSAGE_MAXRSS, offsetof(struct rusage, ru_maxrss));
+	E(SIZE_UTSNAME, sizeof(struct utsname));
+	E(OFF_UTSNAME_RELEASE, offsetof(struct utsname, release));
+	E(SIZE_SYSINFO, sizeof(struct sysinfo));
+	E(OFF_SYSINFO_TOTALRAM, offsetof(struct sysinfo, totalram));
+	E(OFF_SYSINFO_MEMUNIT, offsetof(struct sysinfo, mem_unit));
+	E(SIZE_MSQID_DS, sizeof(struct msqid_ds));
+	E(SIZE_SHMID_DS, sizeof(struct shmid_ds));
+	E(SIZE_SEMID_DS, sizeof(struct semid_ds));
+	E(SIZE_MQ_ATTR, sizeof(struct mq_attr));
+	E(OFF_MQ_ATTR_MSGSIZE, offsetof(struct mq_attr, mq_msgsize));
 	return 0;
 }

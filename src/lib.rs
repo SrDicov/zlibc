@@ -12,6 +12,8 @@ pub mod ctype;
 #[cfg(target_arch = "x86_64")]
 pub mod dirent;
 #[cfg(target_arch = "x86_64")]
+pub mod dns;
+#[cfg(target_arch = "x86_64")]
 pub mod env;
 #[cfg(target_arch = "x86_64")]
 pub mod epoll;
@@ -23,6 +25,8 @@ pub mod fcntl;
 pub mod futex;
 #[cfg(target_arch = "x86_64")]
 pub mod getopt;
+#[cfg(target_arch = "x86_64")]
+pub mod ipc;
 pub mod ldso;
 pub mod libm;
 pub mod locale;
@@ -36,6 +40,8 @@ pub mod mman;
 pub mod multibyte;
 pub mod net;
 pub mod panic;
+#[cfg(target_arch = "x86_64")]
+pub mod passwd;
 #[cfg(target_arch = "x86_64")]
 pub mod poll;
 #[cfg(target_arch = "x86_64")]
@@ -51,6 +57,8 @@ pub mod setjmp;
 #[cfg(target_arch = "x86_64")]
 pub mod signal;
 #[cfg(target_arch = "x86_64")]
+pub mod sockext;
+#[cfg(target_arch = "x86_64")]
 pub mod spawn;
 pub mod start;
 #[cfg(target_arch = "x86_64")]
@@ -63,6 +71,8 @@ pub mod string;
 pub mod symbols;
 pub mod sync;
 pub mod syscall;
+#[cfg(target_arch = "x86_64")]
+pub mod sysconf;
 #[cfg(target_arch = "x86_64")]
 pub mod temp;
 #[cfg(target_arch = "x86_64")]
@@ -287,3 +297,60 @@ const _: () = assert!(PROBE_OFF_DSO_GOT == offset_of!(ldso::dso::Dso, got));
 const _: () = assert!(PROBE_OFF_STAT_DEV == offset_of!(abi::StatKey, st_dev));
 #[cfg(target_arch = "x86_64")]
 const _: () = assert!(PROBE_OFF_STAT_INO == offset_of!(abi::StatKey, st_ino));
+// Ola 10 ABI contract: network/passwd/resource/uts/ipc/mq mirrors.
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_ADDRINFO == size_of::<dns::AddrInfo>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_ADDRINFO_ADDR == offset_of!(dns::AddrInfo, ai_addr));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_SOCKADDR_IN == size_of::<sockext::SockaddrIn>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_SOCKADDR_IN_ADDR == offset_of!(sockext::SockaddrIn, sin_addr));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_SOCKADDR_IN6 == size_of::<sockext::SockaddrIn6>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_SOCKADDR_IN6_ADDR == offset_of!(sockext::SockaddrIn6, sin6_addr));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_PASSWD == size_of::<passwd::Passwd>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_PASSWD_NAME == offset_of!(passwd::Passwd, pw_name));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_PASSWD_UID == offset_of!(passwd::Passwd, pw_uid));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_GROUP == size_of::<passwd::Group>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_GROUP_NAME == offset_of!(passwd::Group, gr_name));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_GROUP_GID == offset_of!(passwd::Group, gr_gid));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_SPWD == size_of::<passwd::Spwd>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_SPWD_NAME == offset_of!(passwd::Spwd, sp_namp));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_RLIMIT == size_of::<sysconf::Rlimit>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_RLIMIT_MAX == offset_of!(sysconf::Rlimit, rlim_max));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_RUSAGE == size_of::<sysconf::Rusage>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_RUSAGE_MAXRSS == offset_of!(sysconf::Rusage, ru_maxrss));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_UTSNAME == size_of::<sysconf::Utsname>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_UTSNAME_RELEASE == offset_of!(sysconf::Utsname, release));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_SYSINFO == size_of::<sysconf::Sysinfo>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_SYSINFO_TOTALRAM == offset_of!(sysconf::Sysinfo, totalram));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_SYSINFO_MEMUNIT == offset_of!(sysconf::Sysinfo, mem_unit));
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_MSQID_DS == size_of::<ipc::MsqidDs>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_SHMID_DS == size_of::<ipc::ShmidDs>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_SEMID_DS == size_of::<ipc::SemidDs>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_SIZE_MQ_ATTR == size_of::<ipc::MqAttr>());
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(PROBE_OFF_MQ_ATTR_MSGSIZE == offset_of!(ipc::MqAttr, mq_msgsize));

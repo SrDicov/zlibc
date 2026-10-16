@@ -430,6 +430,15 @@ jobs:
           test "$out" = "regex ok"
           echo "gate-regex ran: $out"
 
+      - name: Build and run gate-netdb (resolver/passwd/rlimit/crypt)
+        run: |
+          set -e
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc smoke/gate-netdb.c -o /tmp/zlibc-smoke/gate-netdb -Wl,--dynamic-linker,$so
+          out=$(timeout 10 /tmp/zlibc-smoke/gate-netdb)
+          test "$out" = "netdb ok"
+          echo "gate-netdb ran: $out"
+
       - name: Diagnose cold boot on failure
         if: failure()
         run: |
