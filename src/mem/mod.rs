@@ -164,7 +164,7 @@ pub unsafe extern "C" fn bcmp(s1: *const c_void, s2: *const c_void, n: usize) ->
 
 #[cfg(test)]
 mod tests {
-    use core::ffi::c_void;
+    use core::ffi::{c_char, c_void};
 
     // Every call below uses the full `crate::mem::*` path on purpose: on
     // the glibc test host a bare `memcpy` would resolve to libc and prove
