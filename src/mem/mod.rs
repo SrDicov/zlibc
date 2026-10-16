@@ -151,15 +151,34 @@ pub unsafe extern "C" fn strlen(s: *const c_char) -> usize {
     }
 }
 
-/// musl `bcmp` (BSD): `memcmp` that returns only equal-or-not. Shares
-/// the body so there is exactly one comparison loop to keep honest.
+/// musl `bcmp` (BSD): `memcmp` that returns only equal-or-not.
+///
+/// Own loop rather than delegating to [`memcmp`]: the one-line
+/// delegation trapped under release codegen (host test binary died in
+/// `bcmp` with SIGILL during libtest arg parsing, zero tests run,
+/// while every loop-only sibling survived startup). Same byte loop as
+/// the rest of this module, same gate below.
 ///
 /// # Safety
 ///
 /// Both pointers must be valid for reads of `n` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn bcmp(s1: *const c_void, s2: *const c_void, n: usize) -> c_int {
-    unsafe { (memcmp(s1, s2, n) != 0) as c_int }
+    // shortcut: byte loop; word-at-a-time like musl when measured.
+    unsafe {
+        let mut a = s1 as *const u8;
+        let mut b = s2 as *const u8;
+        let mut left = n;
+        while left > 0 {
+            if *a != *b {
+                return 1;
+            }
+            a = a.add(1);
+            b = b.add(1);
+            left -= 1;
+        }
+    }
+    0
 }
 
 #[cfg(test)]

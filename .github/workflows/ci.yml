@@ -54,6 +54,40 @@ jobs:
       # the byte-loops and the inline asm: run the whole suite optimized,
       # serially, so optimization regressions surface here and not at the
       # Alpine gate (6E), where nothing can be bisected.
+      - name: Build (host, release)
+        run: cargo build --release --verbose
+      # Host side of the mem* gate, before the release-test binary runs:
+      # these six symbols link statically into every host test binary
+      # and interpose glibc's (seen: release `bcmp` trapped with SIGILL
+      # in libtest arg parsing, zero tests run). Same checks as the musl
+      # gate: present, no self-call, no `ud2` (a trap in one of these
+      # panic-free leaf loops is always a miscompile, never a guard).
+      - name: mem* gate (host release codegen)
+        run: |
+          fail=0
+          for s in memcpy memmove memset memcmp strlen bcmp; do
+            for f in target/release/deps/libzlibc-*.rlib; do
+              body=$(objdump -d --disassemble="$s" "$f" 2>/dev/null) || true
+              if ! echo "$body" | grep -q "<$s>:"; then
+                echo "::error file=$f::$s absent from host release codegen (gate would be vacuous)"
+                fail=1
+                continue
+              fi
+              calls=$(echo "$body" | awk -v sym="<$s>:" '
+                $0 ~ sym {b=1; next}
+                b && /^[[:space:]]*$/ {exit}
+                b && /call/ {print}')
+              if echo "$calls" | grep -qw "$s"; then
+                echo "::error file=$f::$s self-calls in host release codegen"
+                fail=1
+              fi
+              if echo "$body" | grep -qw ud2; then
+                echo "::error file=$f::$s contains ud2 in host release codegen"
+                fail=1
+              fi
+            done
+          done
+          exit $fail
       - name: Test (release codegen, serial)
         run: 'timeout 300 cargo test --release -- --test-threads=1'
 
@@ -104,6 +138,10 @@ jobs:
                 b && /call/ {print}')
               if echo "$calls" | grep -qw "$s"; then
                 echo "::error file=$f::$s self-calls in release codegen"
+                fail=1
+              fi
+              if echo "$body" | grep -qw ud2; then
+                echo "::error file=$f::$s contains ud2 in release codegen"
                 fail=1
               fi
             done
