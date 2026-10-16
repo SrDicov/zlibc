@@ -266,8 +266,6 @@ jobs:
               continue
             fi
             hits=$(objdump -d --disassemble="$sym" "$so" | grep -E '@plt|@GOTPCREL|call\s+\*|jmp\s+\*|callq|jmpq' || true)
-          echo "--- scanning $f ($sym) ---"
-          echo "hits[$f]=$hits"
             # `_dlstart` ends in the musl-shape tail jump to the loaded
             # entry (`jmp *%rax`, post-boot, GOT valid): the one legal
             # indirect transfer in the pre-reloc set.
