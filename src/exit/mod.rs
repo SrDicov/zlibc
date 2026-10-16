@@ -411,7 +411,7 @@ pub unsafe extern "C" fn abort() -> ! {
 mod tests {
     use super::{
         __cxa_atexit, __funcs_on_exit, __funcs_on_quick_exit, addr_of_mut, at_quick_exit, atexit,
-        c_void, null_mut, AtomicI32, AtomicUsize, Ordering, BUILTIN, HEAD, QUICK_N,
+        c_int, c_void, null_mut, AtomicI32, AtomicUsize, Ordering, BUILTIN, HEAD, QUICK_N,
     };
 
     /// Serializes the stateful tests below (libtest runs them on
@@ -422,6 +422,21 @@ mod tests {
         fn drop(&mut self) {
             TEST_LOCK.store(0, Ordering::SeqCst);
         }
+    }
+    /// Opaque drain for the latch test (see the finished-gate note).
+    #[inline(never)]
+    unsafe fn drain_exit() {
+        unsafe { __funcs_on_exit() }
+    }
+    /// Opaque register for the latch test (same note). `atexit`'s
+    /// `call_adapter` wrapping is reproduced by the caller passing an
+    /// adapter-shaped function.
+    #[inline(never)]
+    unsafe fn reg_exit(f: Option<unsafe extern "C" fn(*mut c_void)>, a: *mut c_void) -> c_int {
+        unsafe { __cxa_atexit(f, a, null_mut()) }
+    }
+    unsafe extern "C" fn unused_adapter(arg: *mut c_void) {
+        let _ = arg;
     }
     fn test_lock() -> TGuard {
         while TEST_LOCK
@@ -469,7 +484,6 @@ mod tests {
         qpush(3);
     }
     unsafe extern "C" fn qnoop() {}
-    unsafe extern "C" fn unused() {}
     // Private quick-probe for the lifecycle test (its own counter: the
     // shared QLOG belongs to `quick_list_lifo_and_reuse`).
     static QL2_N: AtomicUsize = AtomicUsize::new(0);
@@ -506,7 +520,7 @@ mod tests {
             for id in 201u64..=207u64 {
                 assert_eq!(__cxa_atexit(Some(rec), id as *mut c_void, null_mut()), 0);
             }
-            __funcs_on_exit();
+            drain_exit();
             // LIFO: 207..=201, 200, 131..=101, 100, SENTINEL (41 total).
             assert_eq!(LOG_N.load(Ordering::SeqCst), 41);
             let mut i = 0;
@@ -522,9 +536,15 @@ mod tests {
             }
             assert_eq!(LOG[i], 100);
             assert_eq!(LOG[i + 1], SENTINEL);
-            // Finished gate: every further register fails.
-            assert_eq!(atexit(Some(unused)), -1);
-            assert_eq!(__cxa_atexit(Some(rec), null_mut(), null_mut()), -1);
+            // Finished gate: every further register fails. Drain and
+            // check run through opaque wrappers: with the whole latch
+            // lifecycle inlined in one body, release builds fold the
+            // post-drain check against a stale model of the flag (the
+            // drain's own store vanishes from the inlined copy). Real
+            // boots always cross opaque calls here, so the test does too.
+            drain_exit();
+            assert_eq!(reg_exit(Some(unused_adapter), null_mut()), -1);
+            assert_eq!(reg_exit(Some(rec), null_mut()), -1);
         }
     }
 
