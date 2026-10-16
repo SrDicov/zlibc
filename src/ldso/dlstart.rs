@@ -193,6 +193,7 @@ pub unsafe extern "C" fn _dlstart() {
 pub unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usize {
     unsafe {
         let auxv = find_auxv(sp);
+        super::boot::diag_boot(b"c: auxv found\n");
         let mut aux = [0usize; AUX_CNT];
         let mut i = 0usize;
         while *auxv.add(i) != AT_NULL {
@@ -201,6 +202,7 @@ pub unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usi
             }
             i += 2;
         }
+        super::boot::diag_boot(b"c: aux filled\n");
         let mut dynt = [0usize; DYN_CNT];
         let mut j = 0usize;
         while *dynv.add(j) != DT_NULL {
@@ -209,6 +211,7 @@ pub unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usi
             }
             j += 2;
         }
+        super::boot::diag_boot(b"c: dynt filled\n");
         // Bias (dlstart.c:104-115): `AT_BASE`, else `_DYNAMIC` minus the
         // `PT_DYNAMIC` virtual address, scanning backward like musl
         // (dlstart.c:109) so the LAST `PT_DYNAMIC` wins.
