@@ -222,7 +222,7 @@ pub unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usi
         // Sound: every word was just volatile-written above; split from
         // `uninit()` so the `uninit_assumed_init` lint (which cannot see
         // through volatile stores) stays quiet honestly.
-        let mut aux: [usize; AUX_CNT] = unsafe { aux_u.assume_init() };
+        let mut aux: [usize; AUX_CNT] = aux_u.assume_init();
         let mut i = 0usize;
         while *auxv.add(i) != AT_NULL {
             if *auxv.add(i) < AUX_CNT {
@@ -233,7 +233,7 @@ pub unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usi
         super::boot::diag_boot(b"c: aux filled\n");
         let mut dynt_u: core::mem::MaybeUninit<[usize; DYN_CNT]> = core::mem::MaybeUninit::uninit();
         zero_words(dynt_u.as_mut_ptr() as *mut usize, DYN_CNT);
-        let mut dynt: [usize; DYN_CNT] = unsafe { dynt_u.assume_init() };
+        let mut dynt: [usize; DYN_CNT] = dynt_u.assume_init();
         let mut j = 0usize;
         while *dynv.add(j) != DT_NULL {
             if *dynv.add(j) < DYN_CNT {

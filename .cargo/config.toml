@@ -2,8 +2,9 @@
 # x86_64-unknown-linux-musl on purpose: global RUSTFLAGS would poison
 # the host build scripts (same lesson as hello/build.rs).
 #
-# - panic=abort: no unwinder anywhere in the freestanding objects.
-# (The final `-shared` link below adds `-nostdlib -e _dlstart` itself;
-# no link-args here because the archive stage does not link.)
-[target.x86_64-unknown-linux-musl]
-rustflags = ["-C", "panic=abort"]
+# No rustflags: the archive stage does not link, and the final `-shared`
+# link is a plain `cc` invocation in CI. (A `panic=abort` here was tried
+# for the abandoned cdylib and broke the musl build: unwinding panics
+# need the personality the archive itself provides, and abort strategy
+# conflicts with it. Default unwind + our `rust_eh_personality` stub is
+# what every green build used.)
