@@ -2,9 +2,13 @@
 # x86_64-unknown-linux-musl on purpose: global RUSTFLAGS would poison
 # the host build scripts (same lesson as hello/build.rs).
 #
-# No rustflags: the archive stage does not link, and the final `-shared`
-# link is a plain `cc` invocation in CI. (A `panic=abort` here was tried
-# for the abandoned cdylib and broke the musl build: unwinding panics
-# need the personality the archive itself provides, and abort strategy
-# conflicts with it. Default unwind + our `rust_eh_personality` stub is
-# what every green build used.)
+# panic=abort for the musl target: every musl-target build that ever
+# linked and ran (all 6E smoke runs) had it active. Rationale: a
+# freestanding libc has no unwinder to offer landing pads, so codegen
+# must not generate them; abort turns every panic path into a trap.
+# (Default unwind + a plain `#[no_mangle]` personality stub does NOT
+# satisfy rustc's `eh_personality` lang-item requirement — that needs
+# nightly `#[lang]` — so unwind builds hard-error here. When unwinding
+# support genuinely lands, this flag goes away with it.)
+[target.x86_64-unknown-linux-musl]
+rustflags = ["-C", "panic=abort"]
