@@ -158,7 +158,13 @@ jobs:
           # an undefined symbol, and a freestanding libc has almost no
           # undefined references to trigger on (musl links loose objects
           # for the same reason: everything goes in, unconditionally).
-          cc -nostdlib -shared -Wl,-e,_dlstart \
+          # -Bsymbolic-functions: internal calls bind locally (direct
+          # PC32, no PLT). Without it the very first call out of
+          # `_dlstart` goes through an unrelocated PLT and dies there
+          # (seen: fault next to `_dlstart_boot@plt`). Data references
+          # stay preemptible on purpose: COPY interposition needs the
+          # executable's `.bss` to win over our `.data`.
+          cc -nostdlib -shared -Wl,-e,_dlstart -Wl,-Bsymbolic-functions \
             -o /tmp/zlibc-smoke/ld-musl-x86_64.so.1 \
             -Wl,--whole-archive "$a" -Wl,--no-whole-archive
 
