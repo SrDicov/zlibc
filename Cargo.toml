@@ -11,7 +11,7 @@ license = "GPL-3.0-only"
 # and drops it ("dropping unsupported crate type"), so the shared object
 # is linked by hand from the archive — exactly musl's own two-stage
 # shape (objects, then `$(CC) -nostdlib -shared -Wl,-e,_dlstart`).
-crate-type = ["staticlib", "rlib"]
+crate-type = ["rlib"]
 
 # NOTE: no compiler_builtins dependency on purpose. The crates.io
 # releases require a nightly compiler (unconditional #![feature]), so
