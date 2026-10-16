@@ -164,6 +164,7 @@ pub(crate) unsafe fn relocate_self(base: usize, dynt: &[usize; DYN_CNT]) {
 /// never call, never return (a returned entry that faults is the only
 /// way out other than the jump).
 #[cfg(all(not(test), target_arch = "x86_64"))]
+#[no_mangle]
 #[unsafe(naked)]
 pub unsafe extern "C" fn _dlstart() {
     core::arch::naked_asm!(
