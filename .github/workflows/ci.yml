@@ -185,7 +185,11 @@ jobs:
           echo "== _dlstart disassembly (must be PIC-clean: no GOT/PLT before self-reloc) =="
           objdump -d --disassemble=_dlstart "$so"
           echo "== _dlstart_boot calls (want: no @plt) =="
-          objdump -d --disassemble=_dlstart_boot --disassemble=_dlstart_c "$so" | grep -E 'call|jmp|lea.*GOT|mov.*GOT' | head -40
+          objdump -d --disassemble=_dlstart_boot --disassemble=_dlstart_c --disassemble=dynlink_boot "$so" | grep -E '^0|ff 15|call.*plt' | head -60
+          echo "== GOT-filling relocs (want: only RELATIVE, no GLOB_DAT pre-reloc hazard) =="
+          readelf -rW "$so" | awk '$3 ~ /GLOB_DAT|JUMP_SLOT/ {print}' | head -20
+          echo "== RELATIVE count =="
+          readelf -rW "$so" | grep -c RELATIVE
           echo "== hello's view of libc =="
           musl-gcc -Wl,--dynamic-linker,/tmp/zlibc-smoke/ld-musl-x86_64.so.1 \
             -o /tmp/zlibc-smoke/hello-a smoke/hello-a.c
