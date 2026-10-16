@@ -45,6 +45,27 @@ pub struct BootInfo {
 ///
 /// `sp` must be the kernel stack (`argc`, `argc` pointers, NULL, env
 /// strings, NULL, auxv pairs).
+/// Zero `n` words at `p` with volatile stores (musl writes its
+/// tables the same way conceptually: no library call may appear here).
+/// A plain zeroing loop over 256+ bytes is folded by LLVM into a
+/// `memset` libcall (`_dlstart_c`'s `dynt` died exactly this way: the
+/// call went through an unrelocated GOT slot), and neither `volatile`
+/// stores nor this size can be idiom-recognized. Pre-reloc-only by
+/// design; anywhere else a plain loop is clearer.
+///
+/// # Safety
+///
+/// `p` must be writable for `n` words.
+unsafe fn zero_words(p: *mut usize, n: usize) {
+    unsafe {
+        let mut i = 0usize;
+        while i < n {
+            core::ptr::write_volatile(p.add(i), 0);
+            i += 1;
+        }
+    }
+}
+
 /// `envp` from the kernel stack: `argv` is `sp+1`, `envp` follows the
 /// `argc` pointers plus their terminator (mirrors [`find_auxv`], which
 /// walks one step further to the auxv).
@@ -196,7 +217,13 @@ pub unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usi
     unsafe {
         let auxv = find_auxv(sp);
         super::boot::diag_boot(b"c: auxv found\n");
-        let mut aux = [0usize; AUX_CNT];
+        let mut aux_u: core::mem::MaybeUninit<[usize; AUX_CNT]> =
+            core::mem::MaybeUninit::uninit();
+        zero_words(aux_u.as_mut_ptr() as *mut usize, AUX_CNT);
+        // Sound: every word was just volatile-written above; split from
+        // `uninit()` so the `uninit_assumed_init` lint (which cannot see
+        // through volatile stores) stays quiet honestly.
+        let mut aux: [usize; AUX_CNT] = unsafe { aux_u.assume_init() };
         let mut i = 0usize;
         while *auxv.add(i) != AT_NULL {
             if *auxv.add(i) < AUX_CNT {
@@ -205,7 +232,10 @@ pub unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usi
             i += 2;
         }
         super::boot::diag_boot(b"c: aux filled\n");
-        let mut dynt = [0usize; DYN_CNT];
+        let mut dynt_u: core::mem::MaybeUninit<[usize; DYN_CNT]> =
+            core::mem::MaybeUninit::uninit();
+        zero_words(dynt_u.as_mut_ptr() as *mut usize, DYN_CNT);
+        let mut dynt: [usize; DYN_CNT] = unsafe { dynt_u.assume_init() };
         let mut j = 0usize;
         while *dynv.add(j) != DT_NULL {
             if *dynv.add(j) < DYN_CNT {
