@@ -154,10 +154,8 @@ jobs:
           mkdir -p /tmp/zlibc-smoke
           echo "== archive members =="
           ar t "$a" | head -8
-          echo "== _dlstart in archive (want: T) =="
-          nm --defined-only "$a" 2>/dev/null | grep -w _dlstart | head -4
-          echo "== global text symbols in archive (sample) =="
-          nm --defined-only "$a" 2>/dev/null | grep ' T ' | head -8
+          echo "== raw nm head =="
+          nm --defined-only "$a" 2>&1 | head -30
           # --whole-archive: an archive only donates members that resolve
           # an undefined symbol, and a freestanding libc has almost no
           # undefined references to trigger on (musl links loose objects
