@@ -32,6 +32,8 @@ pub mod mem;
 pub mod misc;
 #[cfg(target_arch = "x86_64")]
 pub mod mman;
+#[cfg(target_arch = "x86_64")]
+pub mod multibyte;
 pub mod net;
 pub mod panic;
 #[cfg(target_arch = "x86_64")]
@@ -42,6 +44,9 @@ pub mod prng;
 pub mod process;
 #[cfg(target_arch = "x86_64")]
 pub mod pty;
+// WO-9C-4 pending (backend rate-limit): re-enable with src/regex.rs.
+// #[cfg(target_arch = "x86_64")]
+// pub mod regex;
 #[cfg(target_arch = "x86_64")]
 pub mod setjmp;
 #[cfg(target_arch = "x86_64")]
@@ -65,6 +70,8 @@ pub mod temp;
 pub mod termios;
 #[cfg(target_arch = "x86_64")]
 pub mod thread;
+#[cfg(target_arch = "x86_64")]
+pub mod time;
 #[cfg(target_arch = "x86_64")]
 pub mod unistd;
 #[cfg(target_arch = "x86_64")]
