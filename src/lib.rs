@@ -8,6 +8,8 @@ extern crate std;
 
 pub mod abi;
 pub mod errno;
+#[cfg(target_arch = "x86_64")]
+pub mod exit;
 pub mod futex;
 pub mod ldso;
 pub mod libm;

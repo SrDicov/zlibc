@@ -342,6 +342,22 @@ jobs:
           test "$out" = "dlopen ok"
           echo "gate-dlopen ran: $out"
 
+      - name: Build and run gate-exit (atexit, quick_exit, abort)
+        run: |
+          set -e
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc smoke/gate-exit.c -o /tmp/zlibc-smoke/gate-exit -Wl,--dynamic-linker,$so
+          # Expected deaths: set +e so the 42/43/134 codes don't abort
+          # the step; the `test`s below are still fatal on mismatch.
+          set +e
+          /tmp/zlibc-smoke/gate-exit >/dev/null 2>&1
+          test "$?" = "42"
+          /tmp/zlibc-smoke/gate-exit q >/dev/null 2>&1
+          test "$?" = "43"
+          /tmp/zlibc-smoke/gate-exit a >/dev/null 2>&1
+          test "$?" = "134"
+          echo "gate-exit ran: 42/43/134"
+
       - name: Diagnose cold boot on failure
         if: failure()
         run: |

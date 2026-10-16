@@ -16,8 +16,6 @@
 #[cfg(not(test))]
 use core::ffi::c_long;
 use core::ffi::{c_char, c_int, c_schar, c_void};
-#[cfg(not(test))]
-use core::sync::atomic::{AtomicI32, Ordering};
 
 /// musl `arch/x86_64/bits/syscall.h.in:61` (`__NR_exit`).
 pub const SYS_EXIT: usize = 60; // TODO: generate from arch bits/syscall.h
@@ -283,7 +281,7 @@ unsafe fn libc_start_main_stage2(
 ) -> c_int {
     unsafe { __libc_start_init() };
     let envp = argv.wrapping_add(argc as usize + 1);
-    unsafe { exit(main(argc, argv, envp)) }
+    unsafe { crate::exit::exit(main(argc, argv, envp)) }
 }
 
 /// Basename scan for [`__progname`] (musl `__libc_start_main.c:37`):
@@ -416,57 +414,12 @@ pub unsafe extern "C" fn __init_ssp(entropy: *mut c_void) {
     unsafe { second.write(0) };
 }
 
-/// musl `exit` (src/exit/exit.c:30-47): single-shot gate, then
-/// `__funcs_on_exit` (atexit), `__libc_exit_fini` (fini array),
-/// `__stdio_exit` (stdio flush), `_Exit` — in exactly this order.
-///
-/// shortcut(single-threaded): musl keys the gate on
-/// `__pthread_self()->tid`, trapping recursive calls and spinning on
-/// `__sys_pause` when contended. With no threads/TID yet, any second
-/// arrival is recursion, so it traps outright. Full per-thread lock when
-/// pthreads land (Wave 3).
-#[cfg(not(test))]
-#[no_mangle]
-pub extern "C" fn exit(code: c_int) -> ! {
-    if EXIT_LOCK
-        .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        // Trap: musl `a_crash()` equivalent for recursive `exit`.
-        #[cfg(target_arch = "x86_64")]
-        unsafe {
-            core::arch::asm!("ud2", options(noreturn));
-        }
-        #[cfg(not(target_arch = "x86_64"))]
-        loop {}
-    }
-    unsafe { __funcs_on_exit() };
-    unsafe { __libc_exit_fini() };
-    unsafe { __stdio_exit() };
-    _Exit(code)
-}
-
-/// musl `exit.c:37` (`static volatile int exit_lock[1]`), as an atomic:
-/// single-threaded use needs only the CAS, no TID keying yet.
-#[cfg(not(test))]
-static EXIT_LOCK: AtomicI32 = AtomicI32::new(0);
-
-/// musl `_Exit` (src/exit/_Exit.c:4-7): `SYS_exit_group`, falling back to
-/// `SYS_exit` forever. Raw dispatch, bypassing the errno wrappers:
-/// neither call returns on success, so there is no status to translate.
-#[cfg(not(test))]
-#[no_mangle]
-pub extern "C" fn _Exit(code: c_int) -> ! {
-    unsafe { crate::syscall::syscall1(SYS_EXIT_GROUP, code as usize) };
-    loop {
-        unsafe { crate::syscall::syscall1(SYS_EXIT, code as usize) };
-    }
-}
-
+// `exit`/`_Exit` live in `crate::exit` (Work Order 7A); this file
+// keeps only the hook declarations below.
 // Application entry plus the hook symbols `_start_c`/`exit`/stage-2 call
 // into. All but `main` are weak dummies (next block) until their owning
-// waves define them: `__funcs_on_exit`/`__stdio_exit` (musl
-// src/exit/exit.c:14-15), `__libc_exit_fini` (musl exit.c:28),
+// waves define them: `__stdio_exit` (musl src/exit/exit.c:14-15),
+// `__libc_exit_fini` (musl exit.c:28),
 // `__libc_start_init` (musl __libc_start_main.c:67), `_init`/`_fini`
 // (musl __libc_start_main.c:11, crt/crt1.c:18).
 #[cfg(not(test))]
@@ -474,7 +427,6 @@ extern "C" {
     fn main(argc: c_int, argv: *mut *mut c_char, envp: *mut *mut c_char) -> c_int;
     fn _init();
     fn _fini();
-    fn __funcs_on_exit();
     fn __stdio_exit();
     fn __libc_exit_fini();
     fn __libc_start_init();
@@ -493,8 +445,6 @@ pub extern "C" fn __start_dummy() {}
 crate::weak_alias!(_init, __start_dummy);
 #[cfg(all(not(test), target_arch = "x86_64"))]
 crate::weak_alias!(_fini, __start_dummy);
-#[cfg(all(not(test), target_arch = "x86_64"))]
-crate::weak_alias!(__funcs_on_exit, __start_dummy);
 #[cfg(all(not(test), target_arch = "x86_64"))]
 crate::weak_alias!(__stdio_exit, __start_dummy);
 #[cfg(all(not(test), target_arch = "x86_64"))]
