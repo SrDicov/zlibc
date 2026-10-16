@@ -677,6 +677,41 @@ Premisas del plan verificadas contra evidencia antes de actuar:
 - CI: el paso de enlace usa `link-interp.sh` + chequeo
   "dynsym ⊆ baseline". 5/5 gates, 114 tests, clippy, fmt en verde.
 
+## Ola 7 (núcleo ldso, `ws/6e-1`): `dlopen`, ctores, path config
+
+Entregado y verde (6/6 smokes + 119 tests + CI): `dlopen` FFI
+(`dlapi.rs`: NULL→head, NOLOAD, GLOBAL/revert, BFS-deps para `dlsym`
+local, reloc de lo nuevo, ctores fuera del lock), `extend_bfs_deps` +
+`queue_ctors` + `do_init_fini` (`linkmap.rs`, DFS de musl, exactly-once
+con spin en vez de condvar), `/etc/ld-musl-x86_64.path` en
+`search_bare`, `DT_INIT*` consts, `gate-dlopen` (ctor + dlsym +
+NULL + NOLOAD-miss). Contador: **118/1650 (7,2 %)**.
+
+Dos hallazgos que cambian reglas:
+
+- **Los `RELATIVE` del app nunca se aplicaban.** `skip_relative=true`
+  asumía que `_dlstart` los aplicó, pero `relocate_self` solo toca
+  LDSO. Invisible hasta que los ctores leyeron `.init_array` sin
+  reubicar (salto a offset crudo). Fix: app con `skip=false` (LDSO
+  pases 1/2 mantienen `skip=true`). Regla: un `skip` necesita nombrar
+  *quién* aplicó lo saltado; "ya estaba hecho" sin dueño es un bug.
+- **REGLA DE ORO para `cat jam`: el `global_asm!` vive o muere con el
+  código de su módulo.** Los 23 `weak_alias!(pthread_*)` estaban en
+  `thread/mod.rs`, que no emite código superviviente propio; tras un
+  re-particionado de CGUs por cambios en ficheros vecinos, los aliases
+  desaparecieron del archive sin un solo error (`W pthread_create`
+  1→0, 22 símbolos menos en `.dynsym`, `gate-pthread` 127). Fix:
+  movidos junto a sus targets en `thread/create.rs`. Regla: **todo
+  `global_asm!` va en el fichero con código que lo justifica, nunca en
+  un `mod.rs` re-exportador.** El gate `.dynsym ⊆ baseline` de CI
+  habría pescado la regresión en el acto (se añadió después del hecho;
+  ahora la pesca).
+
+Diferido con dueño: `DT_FINI*` (con un `dlclose` con dientes),
+`install_new_tls` en `dlopen` (librerías con PT_TLS se rechazan alto),
+rollback de `dlopen` fallido (sin unmap; el reintento lo encuentra
+cargado), `preinit`, condvar en vez de spin para ctores contenciosos.
+
 ## "100% done" criteria
 
 - All public musl x86_64 symbols present with correct signature/ABI.
