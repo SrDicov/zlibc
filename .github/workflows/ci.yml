@@ -184,6 +184,8 @@ jobs:
           nm -D --defined-only "$so" | grep -w _dlstart
           echo "== _dlstart disassembly (must be PIC-clean: no GOT/PLT before self-reloc) =="
           objdump -d --disassemble=_dlstart "$so"
+          echo "== _dlstart_boot calls (want: no @plt) =="
+          objdump -d --disassemble=_dlstart_boot "$so" | grep -E 'call|jmp' | head -30
           echo "== hello's view of libc =="
           musl-gcc -Wl,--dynamic-linker,/tmp/zlibc-smoke/ld-musl-x86_64.so.1 \
             -o /tmp/zlibc-smoke/hello-a smoke/hello-a.c
