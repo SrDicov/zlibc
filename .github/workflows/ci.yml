@@ -202,7 +202,9 @@ jobs:
 
       - name: Link the interpreter (musl two-stage shape)
         run: |
-          a=$(echo target/x86_64-unknown-linux-musl/release/libzlibc.a)
+          # Cargo only hardlinks the manifest crate-types to the target
+          # root; the RUSTFLAGS-added staticlib lands in deps/ hashed.
+          a=$(ls -t target/x86_64-unknown-linux-musl/release/deps/libzlibc-*.a | head -1)
           test -f "$a"
           mkdir -p /tmp/zlibc-smoke
           echo "== entry symbols present =="

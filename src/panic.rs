@@ -40,12 +40,17 @@ impl core::fmt::Write for PanicMsg {
 
 /// Unwinder personality for the shared link. The hello bins carry
 /// their own copy (`hello/src/personality.rs`, "never in the lib") —
-// that rule predates the `cdylib`: a static bin links only what it
+/// that rule predates the `cdylib`: a static bin links only what it
 /// references, and its own strong definition satisfies itself, so this
 /// member is never pulled there. The shared link has no other provider,
 /// and under `panic=abort` this is unreachable anyway. If unwinding
 /// ever arrives, both copies must go and a real personality must land.
-#[cfg(not(test))]
+///
+/// `target_env = "musl"` scoped on purpose: the host rlib links into
+/// static bins (hello, test harness) where a second strong definition
+/// is a duplicate-symbol error; the musl objects are the only ones
+/// that ever join the hand-linked `.so`.
+#[cfg(all(not(test), target_env = "musl"))]
 #[no_mangle]
 pub extern "C" fn rust_eh_personality() -> ! {
     loop {
