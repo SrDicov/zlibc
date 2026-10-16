@@ -1263,6 +1263,83 @@ mod tests {
         assert_eq!(unsafe { *at(app_base, 0x08) }, 0xBBBB_BBBB_BBBB_BBBB);
     }
 
+    /// Pass-2 semantics (musl's `relocated = 0` + step-12 pass): after
+    /// the program's `COPY` ran, re-resolving a library `GLOB_DAT`
+    /// searching from `head` must land on the executable's `.bss` copy,
+    /// not the library's original. In a real image the program's entry
+    /// is `SHN_UNDEF` with `st_value` = the COPY destination — the entry
+    /// marks *where* the copy lives, and the copy itself already ran.
+    /// If the slot kept pointing at the library, libc and the program
+    /// would use two different variables (split-brain).
+    #[test]
+    fn glob_dat_follows_interposed_copy() {
+        let mut app_mem = [0u8; 96];
+        let app_base = app_mem.as_mut_ptr();
+        let mut lib_mem = [0u8; 96];
+        let lib_base = lib_mem.as_mut_ptr();
+        unsafe {
+            *at(lib_base, 0x40) = 0xBBBB_BBBB_BBBB_BBBB;
+        }
+        // Program entry: UNDEF, value = COPY destination @0x08.
+        let mut app_syms = [sym(0, 0, 0, 0, 0), sym(0, 0x11, 0, 0x08, 8)];
+        // Library entry: the definition @0x40.
+        let mut lib_syms = [sym(0, 0, 0, 0, 0), sym(0, 0x11, 1, 0x40, 8)];
+        let mut app_strs = *b"obj\0";
+        let mut lib_strs = *b"obj\0";
+        let mut app_ht = [0u32; 5];
+        let mut lib_ht = [0u32; 5];
+        let mut app: Dso = unsafe { core::mem::zeroed() };
+        let mut lib: Dso = unsafe { core::mem::zeroed() };
+        unsafe {
+            sysv_chain(app_ht.as_mut_ptr(), 1);
+            sysv_chain(lib_ht.as_mut_ptr(), 1);
+            wire(
+                &mut app as *mut Dso,
+                app_base,
+                app_syms.as_mut_ptr(),
+                app_strs.as_mut_ptr() as *mut c_char,
+                app_ht.as_mut_ptr(),
+            );
+            wire(
+                &mut lib as *mut Dso,
+                lib_base,
+                lib_syms.as_mut_ptr(),
+                lib_strs.as_mut_ptr() as *mut c_char,
+                lib_ht.as_mut_ptr(),
+            );
+            app.syms_next = &mut lib as *mut Dso;
+        }
+        // Step 1, the program's COPY: lib's bytes land in app's `.bss`.
+        let mut copy = [0x08usize, info(1, REL_COPY), 0];
+        unsafe {
+            do_relocs(
+                &mut app as *mut Dso,
+                &mut app as *mut Dso,
+                copy.as_mut_ptr(),
+                3 * size_of::<usize>(),
+                3,
+                false,
+            )
+        };
+        assert_eq!(unsafe { *at(app_base, 0x08) }, 0xBBBB_BBBB_BBBB_BBBB);
+        // Step 2, pass 2 on the library: its GOT slot must point at the
+        // program's copy, and reading through it yields the copied value.
+        let mut got = [0x10usize, info(1, REL_GOT), 0];
+        unsafe {
+            do_relocs(
+                &mut app as *mut Dso,
+                &mut lib as *mut Dso,
+                got.as_mut_ptr(),
+                3 * size_of::<usize>(),
+                3,
+                false,
+            )
+        };
+        let slot = unsafe { *at(lib_base, 0x10) };
+        assert_eq!(slot, app_base as usize + 0x08);
+        assert_eq!(unsafe { *(slot as *const usize) }, 0xBBBB_BBBB_BBBB_BBBB);
+    }
+
     #[test]
     fn offset32_stores_truncated_pc_delta() {
         let mut mem = [0u8; 64];

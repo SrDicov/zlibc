@@ -239,12 +239,14 @@ pub unsafe extern "C" fn _dlstart_c(sp: *const usize, dynv: *const usize) -> usi
 /// Order inside is the load-bearing part (musl `dynlink.c:1802-2081`):
 /// our `Dso` is decoded *before* `dynlink_boot` so a `DT_NEEDED:
 /// libc.so` resolves to a node with real symbol tables, not the empty
-/// shell. `LDSO.relocated` is set because `relocate_self` already
-/// applied our `RELATIVE` entries; non-relative self relocations are
-/// assumed absent — our image links nothing external, so every internal
-/// reference is `RELATIVE`-class. Verify with `readelf -r` the day a
-/// real `cdylib` exists; a non-relative self reloc would need
-/// `reloc_all(LDSO, skip_relative = true)` here.
+/// shell. Our GOT is relocated in two passes like musl's (`__dls2` at
+/// `dynlink.c:1760` plus the `relocated = 0` reset at `:1763` and the
+/// step-12 pass): pass 1 against ourselves (a cdylib emits `GLOB_DAT`
+/// for exported statics — ELF interposition forbids `RELATIVE` there —
+/// so without it the first GOT load faults), pass 2 against the full
+/// namespace after the program's `COPY` relocs so interposed copies
+/// win. `RELATIVE` is applied exactly once, by `relocate_self`; both
+/// passes skip it.
 ///
 /// FS discipline for the cold-boot path (kernel enters with `FS_BASE`
 /// 0): nothing called from here may execute `%fs` reads. It holds:
@@ -266,7 +268,17 @@ pub unsafe extern "C" fn _dlstart_boot(sp: *const usize, dynv: *const usize) -> 
         (*ldso).base = base as *mut u8;
         (*ldso).dynv = dynv as *mut usize;
         super::dso::decode_dyn(ldso);
-        (*ldso).relocated = 1;
+        // Pass 1 (musl `__dls2`, `dynlink.c:1760-1761`): our
+        // non-`RELATIVE` relocations against ourselves. `relocate_self`
+        // already applied `RELATIVE`, hence `skip_relative` — together
+        // they are the full self-relocation. Without this pass the GOT
+        // slots of our exported statics (`__environ`, `stdout`, …) stay
+        // zero: a cdylib emits `GLOB_DAT` for them because ELF
+        // interposition forbids `RELATIVE` there, and the first GOT load
+        // faults. `head == ldso` with an empty `syms_next`, so only our
+        // own definitions can satisfy it; anything else is fatal, which
+        // is correct — our image links nothing external.
+        super::boot::reloc_all(ldso, ldso, true);
         let auxv = find_auxv(sp);
         let mut aux = [0usize; AUX_CNT];
         let mut i = 0usize;
@@ -278,7 +290,20 @@ pub unsafe extern "C" fn _dlstart_boot(sp: *const usize, dynv: *const usize) -> 
         }
         let app = core::ptr::addr_of_mut!(super::boot::APP);
         *app = super::boot::app_dso_from_aux(&aux);
-        super::boot::dynlink_boot(envp_from_sp(sp), &aux, app, super::boot::load_library)
+        let entry =
+            super::boot::dynlink_boot(envp_from_sp(sp), &aux, app, super::boot::load_library);
+        // Pass 2 (musl's `ldso.relocated = 0` + the step-12 pass,
+        // `dynlink.c:1763,2032-2033`): re-resolve our GOT against the
+        // full namespace, searching from `head`. By now the program ran
+        // its `COPY` relocs, so an interposed `stdout`/`optind`/`environ`
+        // resolves to the executable's `.bss` copy and our GOT follows
+        // it there — otherwise libc would keep reading its private copy
+        // while the program uses its own (split-brain). `RELATIVE`
+        // stays skipped: pass 1 plus `relocate_self` already applied it,
+        // and re-adding the base would corrupt every slot.
+        (*ldso).relocated = 0;
+        super::boot::reloc_all(super::linkmap::head(), ldso, true);
+        entry
     }
 }
 
