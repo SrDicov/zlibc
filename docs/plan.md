@@ -434,6 +434,17 @@ use-after-unmap nondeterminista.
   (self-relocate → decode our `Dso` → build the program's →
   `dynlink_boot` → entry), and the naked `_dlstart` restores `sp`
   from `rbx` and `jmp`s to the returned entry (musl's `CRTJMP`).
+  Two-pass GOT relocation like musl (`__dls2` + `relocated = 0` +
+  step 12): pass 1 resolves our `GLOB_DAT` against ourselves (a cdylib
+  emits `GLOB_DAT`, never `RELATIVE`, for exported statics — without
+  it the first GOT load faults), pass 2 re-resolves against the full
+  namespace after the program's `COPY` so interposed copies win and
+  libc stops reading its private copy (split-brain). `RELATIVE` runs
+  exactly once, in `relocate_self`. Pinned by
+  `glob_dat_follows_interposed_copy`: program entry `UNDEF` with
+  `st_value` = COPY destination, library entry defined, slot ends
+  pointing at the program's `.bss` with the copied value readable
+  through it.
   The three audit points, verified not assumed:
   (1) FS discipline holds by construction — the boot transitive
   closure executes no `%fs` reads (`errno` falls back at base 0,
