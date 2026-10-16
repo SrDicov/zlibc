@@ -75,7 +75,7 @@ jobs:
       - name: mem* must not self-call (release codegen)
         run: |
           fail=0
-          for s in memcpy memmove memset memcmp; do
+          for s in memcpy memmove memset memcmp strlen bcmp; do
             for f in target/x86_64-unknown-linux-musl/release/deps/libzlibc-*.rlib; do
               body=$(objdump -d --disassemble="$s" "$f" 2>/dev/null) || true
               if ! echo "$body" | grep -q "<$s>:"; then
@@ -167,9 +167,13 @@ jobs:
           so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
           echo "== entry =="
           readelf -h "$so" | grep -i entry
-          echo "== UNDEF imports (want: none) =="
+          echo "== UNDEF imports (want: only main) =="
           nm -D --undefined-only "$so" | head -20
-          test -z "$(nm -D --undefined-only "$so")"
+          # `main` is the only honest UNDEF: our `_start_c` lives in the
+          # .so and takes its address, and the executable provides it at
+          # load time. Anything else is a missing provider.
+          undefs=$(nm -D --undefined-only "$so" | awk '{print $NF}' | sort -u | tr '\n' ' ')
+          test "$undefs" = "main "
           echo "== _dlstart exported =="
           nm -D --defined-only "$so" | grep -w _dlstart
           echo "== hello's view of libc =="

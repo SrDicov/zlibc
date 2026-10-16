@@ -13,7 +13,7 @@
 //! shortcut: byte-at-a-time loops; upgrade to word-at-a-time like musl
 //! when measured (musl copies 4/8 bytes per step once aligned).
 
-use core::ffi::{c_int, c_void};
+use core::ffi::{c_char, c_int, c_void};
 
 /// musl `memcpy` (src/string/memcpy.c:5, declared include/string.h:27).
 ///
@@ -130,6 +130,38 @@ pub unsafe extern "C" fn memcmp(s1: *const c_void, s2: *const c_void, n: usize) 
     0
 }
 
+/// musl `strlen`: length to the terminator.
+///
+/// Byte loop like the rest of this module; the release-codegen gate
+/// below proves LLVM does not fold it into a `strlen` call (same
+/// hazard class as the `mem*` self-calls).
+///
+/// # Safety
+///
+/// `s` must point at a valid NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn strlen(s: *const c_char) -> usize {
+    // shortcut: byte loop; word-at-a-time like musl when measured.
+    unsafe {
+        let mut n = 0usize;
+        while *s.add(n) != 0 {
+            n += 1;
+        }
+        n
+    }
+}
+
+/// musl `bcmp` (BSD): `memcmp` that returns only equal-or-not. Shares
+/// the body so there is exactly one comparison loop to keep honest.
+///
+/// # Safety
+///
+/// Both pointers must be valid for reads of `n` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn bcmp(s1: *const c_void, s2: *const c_void, n: usize) -> c_int {
+    unsafe { (memcmp(s1, s2, n) != 0) as c_int }
+}
+
 #[cfg(test)]
 mod tests {
     use core::ffi::c_void;
@@ -235,6 +267,36 @@ mod tests {
                     lo.as_ptr() as *const c_void,
                     1
                 ) > 0
+            );
+        }
+    }
+
+    #[test]
+    fn strlen_counts_to_terminator() {
+        unsafe {
+            assert_eq!(crate::mem::strlen(c"".as_ptr()), 0);
+            assert_eq!(crate::mem::strlen(c"abc".as_ptr()), 3);
+            let buf = *b"ab\0cd";
+            assert_eq!(crate::mem::strlen(buf.as_ptr() as *const c_char), 2);
+        }
+    }
+
+    #[test]
+    fn bcmp_shares_memcmp_verdict() {
+        unsafe {
+            let a = *b"abc";
+            let b = *b"abd";
+            assert_eq!(
+                crate::mem::bcmp(a.as_ptr() as *const c_void, a.as_ptr() as *const c_void, 3),
+                0
+            );
+            assert_ne!(
+                crate::mem::bcmp(a.as_ptr() as *const c_void, b.as_ptr() as *const c_void, 3),
+                0
+            );
+            assert_eq!(
+                crate::mem::bcmp(a.as_ptr() as *const c_void, b.as_ptr() as *const c_void, 0),
+                0
             );
         }
     }
