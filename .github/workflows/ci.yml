@@ -186,6 +186,10 @@ jobs:
           objdump -d --disassemble=_dlstart "$so"
           echo "== _dlstart_boot calls (want: no @plt) =="
           objdump -d --disassemble=_dlstart_c "$so" | head -100
+          echo "== pre-reloc indirect/GOT uses (want: none) =="
+          pre=$(objdump -d --disassemble=_dlstart --disassemble=_dlstart_boot --disassemble=_dlstart_c --disassemble=find_auxv --disassemble=relocate_self --disassemble=zero_words --disassemble=decode_dyn --disassemble=decode_vec --disassemble=app_dso_from_aux --disassemble=envp_from_sp "$so" | grep -E '@plt|@GOTPCREL|call \*|jmp \*' | head -20)
+          echo "$pre"
+          test -z "$pre"
           echo "== GOT-filling relocs (want: only RELATIVE, no GLOB_DAT pre-reloc hazard) =="
           readelf -rW "$so" | awk '$3 ~ /GLOB_DAT|JUMP_SLOT/ {print}' | head -20
           echo "== RELATIVE count =="

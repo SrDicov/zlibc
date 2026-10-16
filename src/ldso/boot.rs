@@ -640,7 +640,12 @@ pub(crate) fn diag_hex(label: &[u8], v: usize) {
 
 fn diag_raw(msg: &[u8]) {
     unsafe {
-        crate::syscall::syscall3(crate::syscall::SYS_WRITE, 2, msg.as_ptr() as usize, msg.len());
+        crate::syscall::syscall3(
+            crate::syscall::SYS_WRITE,
+            2,
+            msg.as_ptr() as usize,
+            msg.len(),
+        );
     }
 }
 
