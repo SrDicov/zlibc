@@ -185,7 +185,7 @@ jobs:
           echo "== _dlstart disassembly (must be PIC-clean: no GOT/PLT before self-reloc) =="
           objdump -d --disassemble=_dlstart "$so"
           echo "== _dlstart_boot calls (want: no @plt) =="
-          objdump -d --disassemble=_dlstart_boot --disassemble=_dlstart_c --disassemble=dynlink_boot "$so" | grep -E '^0|ff 15|call.*plt' | head -60
+          objdump -d --disassemble=_dlstart_boot --disassemble=_dlstart_c "$so" | grep -E 'GOTPCREL|\(%rip\)' | head -40
           echo "== GOT-filling relocs (want: only RELATIVE, no GLOB_DAT pre-reloc hazard) =="
           readelf -rW "$so" | awk '$3 ~ /GLOB_DAT|JUMP_SLOT/ {print}' | head -20
           echo "== RELATIVE count =="
