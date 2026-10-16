@@ -1,0 +1,1 @@
+Unsafe hygiene: no invalid references from null/unaligned pointers, addr_of_mut for static mut, boring #[repr(C)], correct weak_alias ordering, no premature %fs:0 access, no unstable APIs, no unwinding panics.
