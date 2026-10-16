@@ -566,6 +566,50 @@ that `-O0` cannot see.
   "zero calls" otherwise also means "renamed away" — a gate that can
   never fail is worse than no gate.
 
+## Wave 7 packet 6E — loader cold boot (x86_64, v0.25+)
+
+Root causes found and closed for `smoke-6e-a` (all pushed on `ws/6e-1`,
+both jobs green):
+
+- `app.base` MUST come from the **PT_PHDR** entry (`AT_PHDR -
+  phdr(PT_PHDR).p_vaddr`, musl `dynlink.c:1847`), never from `AT_BASE`:
+  that register holds the *interpreter's* base. Pointing `app.dynv` at
+  our own `.text` made `decode_vec` harvest garbage tags, and the very
+  first non-RELATIVE relocation dereferenced `0x8000f8369003`. The
+  regression test `app_base_comes_from_pt_phdr_not_at_base` guards it.
+- The `demo`'s own dso needs a non-copy guard for its first non-
+  RELATIVE relocations: the app is `kernel_mapped = 1` and its own
+  `RELATIVE` entries are already applied by `_dlstart`; the app pass is
+  `reloc_all(head, app, true)`.
+- The exported `static mut boot::LDSO` is resolved on x86_64 via a
+  GLOB_DAT GOT slot when referenced through `addr_of_mut!` from
+  non-`#[no_mangle]` Rust: any *pre-reloc* deref of that symbol reads
+  an unrelocated slot (null). Access it through the naked `lea` accessor
+  with `.hidden LDSO` (inline-asm global_asm directive) *after* pass 1
+  (or with the ~stable internal-linkage shape when LLVM emits one).
+- The first unresolved `main` relocation (GLOB_DAT, executable-side,
+  generated for a V-class slot) must be *deferred*, not fatal, during
+  pass 1 — it resolves later in the app-owned passes.
+
+Toolchain lessons:
+
+- Local `clang --target=x86_64-linux-musl` binaries ask for `libc.so.6`
+  (host glibc crt), NOT musl's `libc.so`; the loader skips the missing
+  dep instead of failing, which is permissive and to be tightened.
+- `cargo clippy --all-targets` is not enough pre-push: also run the
+  musl-target release build and the smoke right before committing.
+- A missing `mod.rs` constant (PT_PHDR) only fails in CI's
+  `--target` build (unresolved import) — always `git status --short`
+  before a push: untracked/modified files left out is the new
+  "operator error".
+
+Symbol gate baseline: `tools/musl-exports.txt` pins **musl 1.2.6**
+(git `b1efda5b`), **1650 exported symbols** (`T:1418 W:199 D:6 R:3
+B:14 V:10`). The Alpine minirootfs artifact in `matrix/` is musl
+`1.2.5` and measures **1647** (`T:1414 W:200 B:14 V:10 D:6 R:3`): the
+`V` class count matches exactly, the `T/W` delta is version drift, not
+a filter bug. Gate denominator stays 1650.
+
 ## "100% done" criteria
 
 - All public musl x86_64 symbols present with correct signature/ABI.
