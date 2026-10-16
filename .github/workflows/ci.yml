@@ -209,19 +209,11 @@ jobs:
           mkdir -p /tmp/zlibc-smoke
           echo "== entry symbols present =="
           nm --defined-only "$a" 2>/dev/null | grep -wE '_dlstart|_dlstart_boot'
-          # --whole-archive: an archive only donates members that resolve
-          # an undefined symbol, and a freestanding libc has almost no
-          # undefined references to trigger on (musl links loose objects
-          # for the same reason: everything goes in, unconditionally).
-          # -Bsymbolic-functions: internal calls bind locally (direct
-          # PC32, no PLT). Without it the very first call out of
-          # `_dlstart` goes through an unrelocated PLT and dies there
-          # (seen: fault next to `_dlstart_boot@plt`). Data references
-          # stay preemptible on purpose: COPY interposition needs the
-          # executable's `.bss` to win over our `.data`.
-          cc -nostdlib -shared -Wl,-e,_dlstart -Wl,-Bsymbolic-functions \
-            -o /tmp/zlibc-smoke/ld-musl-x86_64.so.1 \
-            -Wl,--whole-archive "$a" -Wl,--no-whole-archive
+          # Single-source link recipe (tools/link-interp.sh owns the
+          # flags, the weak-dup localize for compiler_builtins shadows,
+          # and the version-script that keeps mangled Rust internals out
+          # of .dynsym). Flag lore lives in that script, not here.
+          ./tools/link-interp.sh "$a" /tmp/zlibc-smoke/ld-musl-x86_64.so.1
 
       - name: Inspect the interpreter candidate
         run: |
@@ -230,6 +222,17 @@ jobs:
           readelf -h "$so" | grep -i entry
           echo "== UNDEF imports (want: only main) =="
           nm -D --undefined-only "$so" | head -20
+          echo "== dynsym must be baseline-only (no mangled Rust internals) =="
+          export LC_ALL=C
+          grep -v '^#' tools/musl-exports.txt | sort -u > /tmp/base.txt
+          nm -D --defined-only "$so" | awk '{print $3}' | sort -u > /tmp/sodyn.txt
+          extra=$(comm -13 /tmp/base.txt /tmp/sodyn.txt | head -10 || true)
+          if [ -n "$extra" ]; then
+            echo "::error::non-baseline symbols in .dynsym:"
+            echo "$extra"
+            exit 1
+          fi
+          echo "dynsym total: $(wc -l < /tmp/sodyn.txt), all in baseline"
           # `main` is the only honest UNDEF: our `_start_c` lives in the
           # .so and takes its address, and the executable provides it at
           # load time. Anything else is a missing provider.
