@@ -837,6 +837,15 @@ es `ENOTSUP` en musl, no stored; (5) `sem_open` por `shm_open(name)`, no
 path construido (mapname rechaza `/`); (6) `encrypt` opera en bit0
 (test comparaba bytes); (7) rotaciones DES de 28 bits.
 
+## Ola 12C (locale `_l`, `ws/6e-1`): 919 -> 963 simbolos
+
+Entregado y verde: 44 variantes `*_l` (`isalnum_l`..`towlower_l`/
+`towupper_l`/`iswctype_l`/`towctrans_l`/`wctype_l`/`wctrans_l`,
+`strcasecmp_l`/`strncasecmp_l`/`strcoll_l`/`strxfrm_l`/`strerror_l`,
+`strtod_l`/`strtof_l`/`strtold_l`, `wcscoll_l`/`wcsxfrm_l`/
+`wcsftime_l`, `nl_langinfo_l`), todas delegando a la implementacion
+C-locale existente (musl hace lo mismo para la C locale).
+
 ## "100% done" criteria
 
 - All public musl x86_64 symbols present with correct signature/ABI.

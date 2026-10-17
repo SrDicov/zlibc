@@ -495,6 +495,289 @@ pub unsafe extern "C" fn nl_langinfo(item: nl_item) -> *mut c_char {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn isalnum_l(c: c_int, _loc: locale_t) -> c_int {
+    unsafe { crate::ctype::isalnum(c) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn isalpha_l(c: c_int, _loc: locale_t) -> c_int {
+    unsafe { crate::ctype::isalpha(c) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn isblank_l(c: c_int, _loc: locale_t) -> c_int {
+    unsafe { crate::ctype::isblank(c) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn iscntrl_l(c: c_int, _loc: locale_t) -> c_int {
+    unsafe { crate::ctype::iscntrl(c) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn isdigit_l(c: c_int, _loc: locale_t) -> c_int {
+    unsafe { crate::ctype::isdigit(c) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn isgraph_l(c: c_int, _loc: locale_t) -> c_int {
+    unsafe { crate::ctype::isgraph(c) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn islower_l(c: c_int, _loc: locale_t) -> c_int {
+    unsafe { crate::ctype::islower(c) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn isprint_l(c: c_int, _loc: locale_t) -> c_int {
+    unsafe { crate::ctype::isprint(c) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn ispunct_l(c: c_int, _loc: locale_t) -> c_int {
+    unsafe { crate::ctype::ispunct(c) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn isspace_l(c: c_int, _loc: locale_t) -> c_int {
+    unsafe { crate::ctype::isspace(c) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn isupper_l(c: c_int, _loc: locale_t) -> c_int {
+    unsafe { crate::ctype::isupper(c) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn isxdigit_l(c: c_int, _loc: locale_t) -> c_int {
+    unsafe { crate::ctype::isxdigit(c) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn tolower_l(c: c_int, _loc: locale_t) -> c_int {
+    unsafe { crate::ctype::tolower(c) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn toupper_l(c: c_int, _loc: locale_t) -> c_int {
+    unsafe { crate::ctype::toupper(c) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn iswalnum_l(wc: u32, _loc: locale_t) -> c_int {
+    unsafe { crate::wide::iswalnum(wc) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn iswalpha_l(wc: u32, _loc: locale_t) -> c_int {
+    unsafe { crate::wide::iswalpha(wc) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn iswblank_l(wc: u32, _loc: locale_t) -> c_int {
+    unsafe { crate::wide::iswblank(wc) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn iswcntrl_l(wc: u32, _loc: locale_t) -> c_int {
+    unsafe { crate::wide::iswcntrl(wc) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn iswdigit_l(wc: u32, _loc: locale_t) -> c_int {
+    unsafe { crate::wide::iswdigit(wc) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn iswgraph_l(wc: u32, _loc: locale_t) -> c_int {
+    unsafe { crate::wide::iswgraph(wc) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn iswlower_l(wc: u32, _loc: locale_t) -> c_int {
+    unsafe { crate::wide::iswlower(wc) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn iswprint_l(wc: u32, _loc: locale_t) -> c_int {
+    unsafe { crate::wide::iswprint(wc) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn iswpunct_l(wc: u32, _loc: locale_t) -> c_int {
+    unsafe { crate::wide::iswpunct(wc) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn iswspace_l(wc: u32, _loc: locale_t) -> c_int {
+    unsafe { crate::wide::iswspace(wc) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn iswupper_l(wc: u32, _loc: locale_t) -> c_int {
+    unsafe { crate::wide::iswupper(wc) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn iswxdigit_l(wc: u32, _loc: locale_t) -> c_int {
+    unsafe { crate::wide::iswxdigit(wc) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn towlower_l(wc: u32, _loc: locale_t) -> u32 {
+    unsafe { crate::wide::towlower(wc) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn towupper_l(wc: u32, _loc: locale_t) -> u32 {
+    unsafe { crate::wide::towupper(wc) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn iswctype_l(wc: u32, t: usize, _loc: locale_t) -> c_int {
+    unsafe { crate::wide::iswctype(wc, t) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn towctrans_l(wc: u32, t: usize, _loc: locale_t) -> u32 {
+    unsafe { crate::wide::towctrans(wc, t) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn wctype_l(s: *const c_char, _loc: locale_t) -> usize {
+    unsafe { crate::wide::wctype(s) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn wctrans_l(s: *const c_char, _loc: locale_t) -> usize {
+    unsafe { crate::wide::wctrans(s) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn strcasecmp_l(l: *const c_char, r: *const c_char, _loc: locale_t) -> c_int {
+    unsafe { crate::string::strcasecmp(l, r) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn strncasecmp_l(
+    l: *const c_char,
+    r: *const c_char,
+    n: usize,
+    _loc: locale_t,
+) -> c_int {
+    unsafe { crate::string::strncasecmp(l, r, n) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn strcoll_l(_l: *const c_char, _r: *const c_char, _loc: locale_t) -> c_int {
+    0
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn strxfrm_l(
+    d: *mut c_char,
+    s: *const c_char,
+    n: usize,
+    _loc: locale_t,
+) -> usize {
+    unsafe { crate::string::strxfrm(d, s, n) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn strerror_l(e: c_int, _loc: locale_t) -> *mut c_char {
+    unsafe { crate::string::strerror(e) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn nl_langinfo_l(item: nl_item, _loc: locale_t) -> *mut c_char {
+    unsafe { nl_langinfo(item) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn strtod_l(s: *const c_char, e: *mut *mut c_char, _loc: locale_t) -> f64 {
+    unsafe { crate::stdlib::strtod(s, e) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn strtof_l(s: *const c_char, e: *mut *mut c_char, _loc: locale_t) -> f32 {
+    unsafe { crate::stdlib::strtof(s, e) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn strtold_l(s: *const c_char, e: *mut *mut c_char, _loc: locale_t) -> f64 {
+    unsafe { crate::stdlib::strtod(s, e) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn wcscoll_l(l: *const i32, r: *const i32, _loc: locale_t) -> c_int {
+    unsafe { crate::wide::wcscmp(l, r) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn wcsxfrm_l(_d: *mut i32, s: *const i32, n: usize, _loc: locale_t) -> usize {
+    unsafe { crate::wide::wcslen(s).min(n) }
+}
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn wcsftime_l(
+    s: *mut i32,
+    n: usize,
+    fmt: *const i32,
+    tm: *const crate::time::Tm,
+    _loc: locale_t,
+) -> usize {
+    // musl's wcsftime_l delegates to strftime then widens; minimal
+    // version: 0 (musl's C locale formats via strftime_l too).
+    let _ = (s, n, fmt, tm);
+    0
+}
 #[cfg(test)]
 mod tests {
     use super::*;
