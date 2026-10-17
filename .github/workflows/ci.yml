@@ -448,6 +448,15 @@ jobs:
           test "$out" = "sync ok"
           echo "gate-sync ran: $out"
 
+      - name: Build and run gate-math (trig/hyperbolic/rounding)
+        run: |
+          set -e
+          so=/tmp/zlibc-smoke/ld-musl-x86_64.so.1
+          musl-gcc smoke/gate-math.c -o /tmp/zlibc-smoke/gate-math -Wl,--dynamic-linker,$so -lm
+          out=$(timeout 15 /tmp/zlibc-smoke/gate-math)
+          test "$out" = "math ok"
+          echo "gate-math ran: $out"
+
       - name: Diagnose cold boot on failure
         if: failure()
         run: |
